@@ -67,6 +67,27 @@ export function addMonths(key: string, n: number): string {
   return fromUtc(dt).slice(0, 7);
 }
 
+/** বেতনের তারিখ-ভিত্তিক "মাস": শুরুর দিন ১–২৮ (১ মানে সাধারণ ক্যালেন্ডার মাস) */
+export function normalizeStartDay(n: unknown): number {
+  const v = Number(n);
+  return Number.isInteger(v) && v >= 1 && v <= 28 ? v : 1;
+}
+
+/**
+ * তারিখটি কোন "মাসে" পড়ে। শুরুর দিন ২৫ হলে ২৫ অক্টোবর–২৪ নভেম্বর = "নভেম্বর" (যে মাসে শেষ হয় সেই নামে)।
+ */
+export function periodKeyOf(date: string, startDay: number): string {
+  const k = monthKey(date);
+  return startDay > 1 && Number(date.slice(8)) >= startDay ? addMonths(k, 1) : k;
+}
+
+/** "YYYY-MM" মাসের শুরু ও শেষ তারিখ (শুরুর দিন অনুযায়ী) */
+export function periodRange(key: string, startDay: number): { from: string; to: string } {
+  if (startDay <= 1) return { from: startOfMonth(key + "-01"), to: endOfMonth(key + "-01") };
+  const pad = String(startDay).padStart(2, "0");
+  return { from: `${addMonths(key, -1)}-${pad}`, to: addDays(`${key}-${pad}`, -1) };
+}
+
 export function monthsBetween(aKey: string, bKey: string): number {
   const [ay, am] = aKey.split("-").map(Number);
   const [by, bm] = bKey.split("-").map(Number);

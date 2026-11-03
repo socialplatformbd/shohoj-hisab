@@ -3,6 +3,7 @@
 import { Download, ExternalLink, FileUp, MessageCircle, Send, Share2, Trash2, Upload } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { useApp } from "@/components/AppProvider";
+import { PinSection } from "@/components/PinSection";
 import { Field, PageHeader } from "@/components/ui";
 import {
   BACKUP_FILENAME,
@@ -18,7 +19,7 @@ import {
   type SaveResult,
 } from "@/lib/backup";
 import { parseTransactionsCsv, transactionsToCsv } from "@/lib/csv";
-import { dhakaDateOf, todayDhaka } from "@/lib/dates";
+import { dhakaDateOf, periodKeyOf, periodRange, todayDhaka } from "@/lib/dates";
 import { db, eraseAllData, newId, setSetting } from "@/lib/db";
 import { COMMUNITY_LINKS, APP_VERSION } from "@/lib/links";
 import { TX_TYPES, type Theme, type TxType } from "@/lib/types";
@@ -35,7 +36,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export default function SettingsPage() {
-  const { t, settings, updateSetting, data, toast, confirm, lang, digits, date, installEvent, installed, promptInstall, dataReady } = useApp();
+  const { t, settings, updateSetting, data, toast, confirm, lang, digits, date, num, installEvent, installed, promptInstall, dataReady } = useApp();
   const [name, setName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const restoreRef = useRef<HTMLInputElement>(null);
@@ -393,6 +394,39 @@ export default function SettingsPage() {
           </a>
         </div>
       </Section>
+
+      <Section title={t("secMonthStart")}>
+        <p className="text-sm text-muted">{t("monthStartHint")}</p>
+        <Field label={t("monthStartLabel")}>
+          <select
+            className="input"
+            value={settings.monthStartDay}
+            onChange={async (e) => {
+              try {
+                await updateSetting("monthStartDay", Number(e.target.value));
+                toast(t("settingsSaved"));
+              } catch {
+                toast(t("dbError"), "error");
+              }
+            }}
+          >
+            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>
+                {num(d)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <p className="text-sm font-medium">
+          {t("monthStartExample", {
+            a: date(periodRange(periodKeyOf(todayDhaka(), settings.monthStartDay), settings.monthStartDay).from),
+            b: date(periodRange(periodKeyOf(todayDhaka(), settings.monthStartDay), settings.monthStartDay).to),
+          })}
+        </p>
+        <p className="text-xs text-muted">{t("monthStartNote")}</p>
+      </Section>
+
+      <PinSection />
 
       <section className="card space-y-2 border-rose-300">
         <h2 className="text-lg font-bold text-rose-600">{t("resetTitle")}</h2>

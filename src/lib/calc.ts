@@ -1,4 +1,4 @@
-import { addMonths, daysBetween, addDays, inRange, monthKey, monthsBetween, startOfMonth, endOfMonth } from "./dates";
+import { addMonths, daysBetween, addDays, inRange, monthsBetween, periodKeyOf, periodRange } from "./dates";
 import { percentOf } from "./money";
 import type { Budget, Category, Debt, Repayment, Transaction } from "./types";
 
@@ -39,7 +39,7 @@ export interface SeriesPoint {
   expense: number;
 }
 
-export function monthlySeries(txs: Transaction[], fromMonth: string, toMonth: string): SeriesPoint[] {
+export function monthlySeries(txs: Transaction[], fromMonth: string, toMonth: string, startDay = 1): SeriesPoint[] {
   const n = monthsBetween(fromMonth, toMonth);
   const map = new Map<string, SeriesPoint>();
   for (let i = 0; i <= n; i++) {
@@ -47,7 +47,7 @@ export function monthlySeries(txs: Transaction[], fromMonth: string, toMonth: st
     map.set(k, { key: k, income: 0, expense: 0 });
   }
   for (const t of txs) {
-    const p = map.get(monthKey(t.date));
+    const p = map.get(periodKeyOf(t.date, startDay));
     if (!p) continue;
     if (t.type === "income") p.income += t.amount;
     else if (t.type === "expense") p.expense += t.amount;
@@ -113,9 +113,8 @@ export function budgetLevel(percent: number): BudgetLevel {
   return "ok";
 }
 
-export function budgetStatuses(budgets: Budget[], txs: Transaction[], month: string): BudgetStatus[] {
-  const from = startOfMonth(month + "-01");
-  const to = endOfMonth(month + "-01");
+export function budgetStatuses(budgets: Budget[], txs: Transaction[], month: string, startDay = 1): BudgetStatus[] {
+  const { from, to } = periodRange(month, startDay);
   const monthTx = txs.filter((t) => t.type === "expense" && inRange(t.date, from, to));
   const totalSpent = monthTx.reduce((s, t) => s + t.amount, 0);
   const byCat = new Map<string, number>();

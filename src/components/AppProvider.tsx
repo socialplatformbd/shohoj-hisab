@@ -3,7 +3,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BN_MONTHS, BN_MONTHS_SHORT, BN_WEEKDAYS, EN_MONTHS, EN_MONTHS_SHORT, EN_WEEKDAYS, weekdayIndex } from "@/lib/dates";
+import { BN_MONTHS, BN_MONTHS_SHORT, BN_WEEKDAYS, EN_MONTHS, EN_MONTHS_SHORT, EN_WEEKDAYS, normalizeStartDay, weekdayIndex } from "@/lib/dates";
 import { db, setSetting } from "@/lib/db";
 import type { DataBundle } from "@/lib/insights";
 import { translate, type TKey } from "@/lib/i18n";
@@ -20,6 +20,8 @@ export interface Settings {
   welcomeDone: boolean;
   budgetNotifications: boolean;
   lastBackupAt: number | null;
+  /** মাস কোন তারিখ থেকে শুরু (১ = সাধারণ ক্যালেন্ডার মাস; বেতনের তারিখ হলে ২–২৮) */
+  monthStartDay: number;
 }
 
 type ToastKind = "success" | "error" | "warn" | "info";
@@ -110,6 +112,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       welcomeDone: m.get("welcomeDone") === true,
       budgetNotifications: m.get("budgetNotifications") === true,
       lastBackupAt: typeof m.get("lastBackupAt") === "number" ? (m.get("lastBackupAt") as number) : null,
+      monthStartDay: normalizeStartDay(m.get("monthStartDay")),
     };
   }, [settingRows]);
 

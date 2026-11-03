@@ -57,6 +57,22 @@ export interface Repayment {
   createdAt: number;
 }
 
+/** প্রতি মাসের নির্দিষ্ট তারিখে নিজে নিজে যোগ হওয়া লেনদেনের নিয়ম (বেতন, ভাড়া, কিস্তি ইত্যাদি) */
+export interface Recurring {
+  id: string;
+  type: TxType;
+  amount: number;
+  categoryId: string;
+  description?: string;
+  paymentMethod?: string;
+  dayOfMonth: number; // ১–৩১ (ছোট মাসে মাসের শেষ দিন)
+  startMonth: string; // YYYY-MM — যে মাস থেকে চালু
+  lastMonth?: string; // YYYY-MM — সর্বশেষ যে মাসের লেনদেন তৈরি হয়েছে
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface SettingRow {
   key: string;
   value: string | number | boolean | null;

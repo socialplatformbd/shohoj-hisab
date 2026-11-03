@@ -2,9 +2,9 @@
  * লক্ষ্য: প্রথমবার অনলাইনে খোলার পর পুরো অ্যাপ (সব পেজ + JS/CSS) অফলাইনে চলা।
  * আর্থিক ডেটা এখানে নেই — তা IndexedDB-তে থাকে। /api/* কখনো ক্যাশ হয় না।
  */
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `shohoj-hisab-shell-${VERSION}`;
-const ROUTES = ["/", "/transactions", "/reports", "/budgets", "/debts", "/ai", "/settings", "/more"];
+const ROUTES = ["/", "/transactions", "/reports", "/budgets", "/debts", "/recurring", "/ai", "/settings", "/more"];
 const STATIC = ["/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png", "/icon.svg"];
 
 async function precache() {

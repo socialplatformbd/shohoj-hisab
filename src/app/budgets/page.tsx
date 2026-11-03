@@ -5,17 +5,18 @@ import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
 import { EmptyState, Field, PageHeader, ProgressBar, Sheet } from "@/components/ui";
 import { budgetStatuses, type BudgetStatus } from "@/lib/calc";
-import { addMonths, monthKey, todayDhaka } from "@/lib/dates";
+import { addMonths, periodKeyOf, periodRange, todayDhaka } from "@/lib/dates";
 import { db, newId } from "@/lib/db";
 import { formatPlainPaisa, parseAmountToPaisa } from "@/lib/money";
 import type { Budget } from "@/lib/types";
 
 export default function BudgetsPage() {
-  const { t, data, catName, money, num, monthLabel, toast, confirm, dataReady } = useApp();
-  const [month, setMonth] = useState(monthKey(todayDhaka()));
+  const { t, data, catName, money, num, monthLabel, date, settings, toast, confirm, dataReady } = useApp();
+  const startDay = settings.monthStartDay;
+  const [month, setMonth] = useState(periodKeyOf(todayDhaka(), startDay));
   const [editing, setEditing] = useState<{ budget?: Budget } | null>(null);
 
-  const statuses = useMemo(() => budgetStatuses(data.budgets, data.transactions, month), [data.budgets, data.transactions, month]);
+  const statuses = useMemo(() => budgetStatuses(data.budgets, data.transactions, month, startDay), [data.budgets, data.transactions, month, startDay]);
   const catById = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories]);
   const overall = statuses.find((s) => s.budget.categoryId === null);
   const catStatuses = statuses.filter((s) => s.budget.categoryId !== null);
@@ -103,7 +104,14 @@ export default function BudgetsPage() {
         <button className="btn btn-ghost px-3" onClick={() => setMonth(addMonths(month, -1))} aria-label={t("prev")}>
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <p className="flex-1 text-center text-lg font-bold">{monthLabel(month)}</p>
+        <div className="flex-1 text-center">
+          <p className="text-lg font-bold">{monthLabel(month)}</p>
+          {startDay > 1 && (
+            <p className="text-xs text-muted">
+              {date(periodRange(month, startDay).from)} – {date(periodRange(month, startDay).to)}
+            </p>
+          )}
+        </div>
         <button className="btn btn-ghost px-3" onClick={() => setMonth(addMonths(month, 1))} aria-label={t("next")}>
           <ChevronRight className="h-5 w-5" />
         </button>

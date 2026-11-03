@@ -3,14 +3,17 @@ import "fake-indexeddb/auto";
 import assert from "node:assert/strict";
 import { formatMoney, parseAmountToPaisa, numberToPaisa, percentOf } from "../src/lib/money";
 import { addDays, endOfMonth, startOfWeek, todayDhaka, isValidIsoDate, BN_MONTHS_SHORT, EN_MONTHS_SHORT } from "../src/lib/dates";
-import { budgetStatuses, debtTotals, sumTx, categoryBreakdown, summarizeDebt } from "../src/lib/calc";
+import { budgetStatuses, debtTotals, sumTx, categoryBreakdown, summarizeDebt, monthlySeries } from "../src/lib/calc";
+import { normalizeStartDay, periodKeyOf, periodRange } from "../src/lib/dates";
 import { parseLocalText } from "../src/lib/localParser";
 import { DEFAULT_CATEGORIES, db, newId, eraseAllData } from "../src/lib/db";
 import { buildBackup, validateBackupText, restoreBackup, BackupError } from "../src/lib/backup";
 import { transactionsToCsv, parseTransactionsCsv } from "../src/lib/csv";
 import { ExtractResponseSchema } from "../src/lib/aiSchema";
 import { localAnswer } from "../src/lib/insights";
-import type { Transaction, Debt, Repayment, Budget } from "../src/lib/types";
+import { dueOccurrences, defaultStartMonth, generateRecurring, occurrenceId, scheduledDate } from "../src/lib/recurring";
+import { PIN_RE, hashPin, makeSalt, normalizePin, verifyPin } from "../src/lib/pin";
+import type { Transaction, Debt, Repayment, Budget, Recurring } from "../src/lib/types";
 
 let n = 0;
 const ok = (name: string, fn: () => void | Promise<void>) =>
@@ -262,6 +265,91 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     b.data.categories = b.data.categories.filter((c: { id: string }) => used.has(c.id));
     await restoreBackup(validateBackupText(JSON.stringify(b)));
     assert.equal(await db.categories.count(), DEFAULT_CATEGORIES.length);
+  });
+
+  console.log("বেতন-মাস (মাসের শুরুর তারিখ)");
+  await ok("periodKeyOf / periodRange", () => {
+    assert.equal(normalizeStartDay(25), 25);
+    assert.equal(normalizeStartDay(0), 1);
+    assert.equal(normalizeStartDay(29), 1);
+    assert.equal(normalizeStartDay("x"), 1);
+    assert.deepEqual(periodRange("2026-11", 1), { from: "2026-11-01", to: "2026-11-30" });
+    assert.deepEqual(periodRange("2026-11", 25), { from: "2026-10-25", to: "2026-11-24" });
+    assert.deepEqual(periodRange("2027-01", 25), { from: "2026-12-25", to: "2027-01-24" });
+    assert.equal(periodKeyOf("2026-10-24", 25), "2026-10");
+    assert.equal(periodKeyOf("2026-10-25", 25), "2026-11");
+    assert.equal(periodKeyOf("2026-12-31", 25), "2027-01");
+    for (const D of [1, 2, 15, 25, 28]) {
+      for (const key of ["2026-01", "2026-02", "2026-12", "2028-03"]) {
+        const r = periodRange(key, D);
+        assert.equal(periodKeyOf(r.from, D), key);
+        assert.equal(periodKeyOf(r.to, D), key);
+      }
+    }
+  });
+  await ok("বাজেট ও চার্ট শুরুর তারিখ মানে", () => {
+    const txs = [tx({ date: "2026-10-24", amount: 1000 }), tx({ date: "2026-10-25", amount: 2000 }), tx({ date: "2026-11-24", amount: 3000 }), tx({ date: "2026-11-25", amount: 5000 })];
+    const b: Budget[] = [{ id: "bb", month: "2026-11", categoryId: null, amount: 10000, createdAt: 1, updatedAt: 1 }];
+    assert.equal(budgetStatuses(b, txs, "2026-11", 25)[0].spent, 5000);
+    assert.equal(budgetStatuses(b, txs, "2026-11")[0].spent, 8000);
+    assert.deepEqual(monthlySeries(txs, "2026-10", "2026-12", 25).map((x) => x.expense), [1000, 5000, 5000]);
+    assert.deepEqual(monthlySeries(txs, "2026-10", "2026-12").map((x) => x.expense), [3000, 8000, 0]);
+  });
+
+  console.log("নিয়মিত লেনদেন ও পিন");
+  await ok("নিয়মিত লেনদেনের তারিখ-হিসাব", () => {
+    const r = (o: Partial<Recurring> = {}): Recurring => ({ id: "r1", type: "expense", amount: 100, categoryId: "cat_housing", dayOfMonth: 5, startMonth: "2026-05", active: true, createdAt: 0, updatedAt: 0, ...o });
+    assert.equal(scheduledDate("2026-02", 31), "2026-02-28");
+    assert.equal(scheduledDate("2028-02", 31), "2028-02-29");
+    assert.equal(scheduledDate("2026-04", 31), "2026-04-30");
+    assert.deepEqual(dueOccurrences(r(), "2026-07-10").map((x) => x.month), ["2026-05", "2026-06", "2026-07"]);
+    assert.equal(dueOccurrences(r({ lastMonth: "2026-10" }), "2026-11-03").length, 0);
+    assert.equal(dueOccurrences(r({ lastMonth: "2026-10" }), "2026-11-05").length, 1);
+    assert.equal(dueOccurrences(r({ active: false }), "2026-11-10").length, 0);
+    assert.equal(dueOccurrences(r({ startMonth: "2020-01" }), "2026-11-30").length, 24);
+    assert.deepEqual(dueOccurrences(r({ startMonth: "2026-11", dayOfMonth: 1 }), "2027-02-01").map((x) => x.month), ["2026-11", "2026-12", "2027-01", "2027-02"]);
+    assert.equal(defaultStartMonth(25, "2026-11-03"), "2026-11");
+    assert.equal(defaultStartMonth(2, "2026-12-20"), "2027-01");
+  });
+  await ok("পিন হ্যাশ ও যাচাই", async () => {
+    const salt = makeSalt();
+    const h = await hashPin("1234", salt);
+    assert.ok(await verifyPin("1234", salt, h));
+    assert.ok(!(await verifyPin("1235", salt, h)));
+    assert.equal(normalizePin(" ১২৩৪ "), "1234");
+    assert.ok(PIN_RE.test("1234") && PIN_RE.test("123456") && !PIN_RE.test("123") && !PIN_RE.test("1234567"));
+  });
+  await ok("generateRecurring: তৈরি, ডুপ্লিকেট নয়, মুছলে ফেরে না, সম্পাদনা অক্ষত", async () => {
+    await db.recurring.clear();
+    const before = await db.transactions.count();
+    const rule: Recurring = { id: "rr1", type: "expense", amount: 500000, categoryId: "cat_housing", description: "বাসা ভাড়া", dayOfMonth: 5, startMonth: "2026-08", active: true, createdAt: 1, updatedAt: 1 };
+    await db.recurring.add(rule);
+    assert.equal(await generateRecurring("2026-10-10"), 3);
+    assert.equal(await db.transactions.count(), before + 3);
+    assert.equal(await generateRecurring("2026-10-10"), 0);
+    const sep = occurrenceId("rr1", "2026-09");
+    const oct = occurrenceId("rr1", "2026-10");
+    await db.transactions.delete(sep);
+    await db.transactions.update(oct, { amount: 600000 });
+    assert.equal(await generateRecurring("2026-10-20"), 0);
+    assert.equal(await db.transactions.get(sep), undefined);
+    assert.equal((await db.transactions.get(oct))?.amount, 600000);
+    assert.equal(await generateRecurring("2026-11-05"), 1);
+  });
+  await ok("ব্যাকআপে নিয়মিত লেনদেন যায় ও ফেরে; পুরনো ব্যাকআপ (recurring ছাড়া) চলে", async () => {
+    const b = await buildBackup();
+    assert.equal(b.data.recurring.length, 1);
+    const text2 = JSON.stringify(b);
+    await db.recurring.clear();
+    await restoreBackup(validateBackupText(text2));
+    assert.equal(await db.recurring.count(), 1);
+    const old = JSON.parse(text2);
+    delete old.data.recurring;
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.recurring, []);
+  });
+  await ok("সব ডেটা মুছলে নিয়মিত লেনদেনও যায়", async () => {
+    await eraseAllData();
+    assert.equal(await db.recurring.count(), 0);
   });
 
   console.log(`\nসম্পন্ন: ${n} টি পরীক্ষা চলেছে`, process.exitCode ? "— ব্যর্থতা আছে ✗" : "— সব পাস ✓");

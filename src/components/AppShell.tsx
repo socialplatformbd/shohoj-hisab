@@ -5,15 +5,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useApp } from "./AppProvider";
+import { LockGate } from "./LockGate";
 import { Logo } from "./Logo";
 import { useTxForm } from "./TransactionForm";
 import { Spinner } from "./ui";
+import { todayDhaka } from "@/lib/dates";
+import { generateRecurring } from "@/lib/recurring";
 import { Welcome } from "./Welcome";
 
-const MORE_PATHS = ["/more", "/budgets", "/debts", "/settings"];
+const MORE_PATHS = ["/more", "/budgets", "/debts", "/recurring", "/settings"];
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { ready, dbError, settings, t, online } = useApp();
+  const { ready, dbError, settings, t, online, toast } = useApp();
   const pathname = usePathname();
   const form = useTxForm();
   const [mounted, setMounted] = useState(false);
@@ -27,6 +30,31 @@ export function AppShell({ children }: { children: ReactNode }) {
       /* নিবন্ধন ব্যর্থ হলেও অ্যাপ স্বাভাবিক চলবে */
     });
   }, []);
+
+  // নিয়মিত লেনদেন: অ্যাপ খুললে ও আবার সামনে এলে বাকি থাকা লেনদেন যোগ করে (একই লেনদেন দুইবার তৈরি হয় না)
+  const welcomeDone = settings.welcomeDone;
+  useEffect(() => {
+    if (!ready || !welcomeDone) return;
+    let cancelled = false;
+    const run = () => {
+      generateRecurring(todayDhaka())
+        .then((n) => {
+          if (n > 0 && !cancelled) toast(t("recurringAutoAdded", { n }));
+        })
+        .catch(() => {
+          /* ব্যর্থ হলে পরের বার আবার চেষ্টা হবে */
+        });
+    };
+    run();
+    const onVis = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [ready, welcomeDone, toast, t]);
 
   if (!mounted || (!ready && !dbError)) {
     return (
@@ -66,6 +94,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const showFab = pathname === "/" || pathname.startsWith("/transactions");
 
   return (
+    <LockGate>
     <div className="mx-auto min-h-dvh w-full max-w-2xl">
       <header className="sticky top-0 z-30 border-b border-line bg-card/95 backdrop-blur">
         <div className="flex items-center gap-3 px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
@@ -118,5 +147,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </ul>
       </nav>
     </div>
+    </LockGate>
   );
 }

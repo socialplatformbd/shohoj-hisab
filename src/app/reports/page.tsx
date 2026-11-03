@@ -8,17 +8,18 @@ import { EmptyState, IncomeExpenseChart, PageHeader } from "@/components/ui";
 import { categoryBreakdown, dailySeries, filterRange, monthlySeries, sumTx } from "@/lib/calc";
 import { saveBlob } from "@/lib/backup";
 import { transactionsToCsv } from "@/lib/csv";
-import { addDays, addMonths, daysBetween, endOfMonth, endOfWeek, monthKey, startOfMonth, startOfWeek, todayDhaka } from "@/lib/dates";
+import { addDays, addMonths, daysBetween, endOfWeek, periodKeyOf, periodRange, startOfMonth, startOfWeek, todayDhaka } from "@/lib/dates";
 import { percentOf } from "@/lib/money";
 
 type Mode = "daily" | "weekly" | "monthly" | "custom";
 
 export default function ReportsPage() {
-  const { t, data, catName, money, num, date, shortDate, monthLabel, monthShort, toast, dataReady } = useApp();
+  const { t, data, catName, money, num, date, shortDate, monthLabel, monthShort, settings, toast, dataReady } = useApp();
+  const startDay = settings.monthStartDay;
   const today = todayDhaka();
   const [mode, setMode] = useState<Mode>("monthly");
   const [day, setDay] = useState(today);
-  const [month, setMonth] = useState(monthKey(today));
+  const [month, setMonth] = useState(periodKeyOf(today, startDay));
   const [week, setWeek] = useState(today);
   const [custom, setCustom] = useState({ from: startOfMonth(today), to: today });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -26,9 +27,9 @@ export default function ReportsPage() {
   const range = useMemo(() => {
     if (mode === "daily") return { from: day, to: day };
     if (mode === "weekly") return { from: startOfWeek(week), to: endOfWeek(week) };
-    if (mode === "monthly") return { from: startOfMonth(month + "-01"), to: endOfMonth(month + "-01") };
+    if (mode === "monthly") return periodRange(month, startDay);
     return custom.from <= custom.to ? custom : { from: custom.to, to: custom.from };
-  }, [mode, day, week, month, custom]);
+  }, [mode, day, week, month, custom, startDay]);
 
   const list = useMemo(
     () =>
@@ -41,11 +42,11 @@ export default function ReportsPage() {
   const span = daysBetween(range.from, range.to) + 1;
   const series = useMemo(() => {
     if (span <= 31) return dailySeries(list, range.from, range.to);
-    const fm = monthKey(range.from);
-    const tm = monthKey(range.to);
+    const fm = periodKeyOf(range.from, startDay);
+    const tm = periodKeyOf(range.to, startDay);
     const capped = addMonths(tm, -35) > fm ? addMonths(tm, -35) : fm;
-    return monthlySeries(list, capped, tm);
-  }, [list, range, span]);
+    return monthlySeries(list, capped, tm, startDay);
+  }, [list, range, span, startDay]);
 
   const savingsRate = percentOf(Math.max(0, totals.savings), totals.income);
   const selected = selectedId ? data.transactions.find((x) => x.id === selectedId) : undefined;

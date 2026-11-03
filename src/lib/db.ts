@@ -1,8 +1,8 @@
 import Dexie, { type Table } from "dexie";
-import type { Budget, Category, Debt, Repayment, SettingRow, Transaction } from "./types";
+import type { Budget, Category, Debt, Recurring, Repayment, SettingRow, Transaction } from "./types";
 
 export const DB_NAME = "shohoj-hisab";
-export const DB_SCHEMA_VERSION = 1;
+export const DB_SCHEMA_VERSION = 2;
 
 export const DEFAULT_CATEGORIES: Category[] = (
   [
@@ -40,17 +40,21 @@ class HisabDB extends Dexie {
   debts!: Table<Debt, string>;
   repayments!: Table<Repayment, string>;
   settings!: Table<SettingRow, string>;
+  recurring!: Table<Recurring, string>;
 
   constructor() {
     super(DB_NAME);
-    this.version(DB_SCHEMA_VERSION).stores({
+    const base = {
       transactions: "id, type, categoryId, date, createdAt",
       categories: "id, type",
       budgets: "id, month, categoryId",
       debts: "id, kind, date",
       repayments: "id, debtId",
       settings: "key",
-    });
+    };
+    this.version(1).stores(base);
+    // v2: নিয়মিত লেনদেন (পুরনো ডেটা অক্ষত থাকে)
+    this.version(DB_SCHEMA_VERSION).stores({ ...base, recurring: "id" });
     this.on("populate", (tx) => {
       tx.table("categories").bulkAdd(DEFAULT_CATEGORIES);
     });
@@ -75,8 +79,8 @@ export async function setSetting(key: string, value: SettingRow["value"]): Promi
 
 /** সব ডেটা মুছে ডিফল্ট খাত আবার বসায় (ওয়েলকাম-স্ক্রিনের অবস্থা অক্ষত থাকে) */
 export async function eraseAllData(): Promise<void> {
-  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.settings], async () => {
-    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear()]);
+  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.settings], async () => {
+    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear()]);
     await db.categories.bulkAdd(DEFAULT_CATEGORIES);
     await db.settings.delete("lastBackupAt");
   });

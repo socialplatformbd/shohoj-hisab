@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, HandCoins, PiggyBank, Settings } from "lucide-react";
+import { ChevronRight, HandCoins, PiggyBank, Repeat, Settings } from "lucide-react";
 import Link from "next/link";
 import { useApp } from "@/components/AppProvider";
 import { PageHeader } from "@/components/ui";
@@ -10,6 +10,7 @@ export default function MorePage() {
   const items = [
     { href: "/budgets", label: t("navBudgets"), icon: PiggyBank, color: "bg-amber-500" },
     { href: "/debts", label: t("navDebts"), icon: HandCoins, color: "bg-sky-600" },
+    { href: "/recurring", label: t("navRecurring"), icon: Repeat, color: "bg-violet-600" },
     { href: "/settings", label: t("navSettings"), icon: Settings, color: "bg-slate-600" },
   ];
   return (

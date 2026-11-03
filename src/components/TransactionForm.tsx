@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus } from "lucide-react";
-import { isValidIsoDate, monthKey, todayDhaka } from "@/lib/dates";
+import { isValidIsoDate, periodKeyOf, todayDhaka } from "@/lib/dates";
 import { db, newId } from "@/lib/db";
 import { formatPlainPaisa, parseAmountToPaisa } from "@/lib/money";
 import { PAYMENT_METHODS, TX_TYPES, type Category, type Transaction, type TxType } from "@/lib/types";
@@ -44,7 +44,7 @@ export function TxFormProvider({ children }: { children: ReactNode }) {
 }
 
 function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: () => void }) {
-  const { t, data, catName, toast } = useApp();
+  const { t, data, catName, settings, toast } = useApp();
   const checkBudgets = useBudgetAlerts();
   const editing = initial.tx;
   const [type, setType] = useState<TxType>(editing?.type ?? initial.type ?? "expense");
@@ -107,7 +107,7 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
       if (type === "expense") {
         const before = data.transactions;
         const after = [...before.filter((x) => x.id !== tx.id), tx];
-        checkBudgets(before, after, [monthKey(tx.date)]);
+        checkBudgets(before, after, [periodKeyOf(tx.date, settings.monthStartDay)]);
       }
       onClose();
     } catch {

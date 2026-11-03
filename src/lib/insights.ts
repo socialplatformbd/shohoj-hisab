@@ -6,7 +6,7 @@ import {
   filterRange,
   sumTx,
 } from "./calc";
-import { addMonths, endOfMonth, monthKey, startOfMonth } from "./dates";
+import { addMonths, periodKeyOf, periodRange } from "./dates";
 import { formatMoney } from "./money";
 import type { Budget, Category, Debt, Digits, Lang, Repayment, Transaction } from "./types";
 
@@ -27,12 +27,15 @@ function catLabel(c: Category | undefined, lang: Lang): string {
  * AI-কে দেওয়া "তথ্যের সারাংশ"। সব অঙ্ক এখানে নির্ধারিত কোডে হিসাব করা;
  * AI শুধু এগুলো থেকে উত্তর সাজাবে, নিজে হিসাব বা তথ্য বানাবে না।
  */
-export function buildFacts(data: DataBundle, today: string, lang: Lang, digits: Digits): string {
+export function buildFacts(data: DataBundle, today: string, lang: Lang, digits: Digits, startDay = 1): string {
   const m = (p: number) => formatMoney(p, digits);
   const cats = categoryMap(data.categories);
-  const thisMonth = monthKey(today);
+  const thisMonth = periodKeyOf(today, startDay);
   const lastMonth = addMonths(thisMonth, -1);
-  const monthTx = (k: string) => filterRange(data.transactions, startOfMonth(k + "-01"), endOfMonth(k + "-01"));
+  const monthTx = (k: string) => {
+    const r = periodRange(k, startDay);
+    return filterRange(data.transactions, r.from, r.to);
+  };
   const cur = monthTx(thisMonth);
   const prev = monthTx(lastMonth);
   const todayTx = data.transactions.filter((t) => t.date === today);
@@ -44,7 +47,7 @@ export function buildFacts(data: DataBundle, today: string, lang: Lang, digits: 
     categoryBreakdown(list, "expense")
       .slice(0, 10)
       .map((c) => ({ category: catLabel(cats.get(c.categoryId), lang), amount: m(c.total), percentOfExpense: c.percent, count: c.count }));
-  const budgets = budgetStatuses(data.budgets, data.transactions, thisMonth).map((b) => ({
+  const budgets = budgetStatuses(data.budgets, data.transactions, thisMonth, startDay).map((b) => ({
     for: b.budget.categoryId === null ? "overall" : catLabel(cats.get(b.budget.categoryId), lang),
     budget: m(b.budget.amount),
     spent: m(b.spent),
@@ -62,6 +65,7 @@ export function buildFacts(data: DataBundle, today: string, lang: Lang, digits: 
     today,
     currency: "BDT",
     currentMonth: thisMonth,
+    currentMonthRange: periodRange(thisMonth, startDay),
     allTime: t(data.transactions),
     thisMonth: { ...t(cur), expenseByCategory: breakdown(cur), biggestExpenses: biggest, transactionCount: cur.length },
     lastMonth: { month: lastMonth, ...t(prev), expenseByCategory: breakdown(prev) },
@@ -114,18 +118,11 @@ export function periodSummary(
   return lines.join("\n");
 }
 
-export function monthSummary(data: DataBundle, today: string, lang: Lang, digits: Digits): string {
-  const k = monthKey(today);
-  const pk = addMonths(k, -1);
-  return periodSummary(
-    data,
-    startOfMonth(k + "-01"),
-    endOfMonth(k + "-01"),
-    lang === "bn" ? "এই মাসের সারাংশ" : "This month's summary",
-    lang,
-    digits,
-    [startOfMonth(pk + "-01"), endOfMonth(pk + "-01")],
-  );
+export function monthSummary(data: DataBundle, today: string, lang: Lang, digits: Digits, startDay = 1): string {
+  const k = periodKeyOf(today, startDay);
+  const cur = periodRange(k, startDay);
+  const prev = periodRange(addMonths(k, -1), startDay);
+  return periodSummary(data, cur.from, cur.to, lang === "bn" ? "এই মাসের সারাংশ" : "This month's summary", lang, digits, [prev.from, prev.to]);
 }
 
 export function todaySummary(data: DataBundle, today: string, lang: Lang, digits: Digits): string {
@@ -145,10 +142,10 @@ export function topCategoryAnswer(data: DataBundle, from: string, to: string, la
     : `The highest spending ${label} was “${name}” — ${formatMoney(top.total, digits)} (${top.percent}% of expenses).`;
 }
 
-export function budgetAnswer(data: DataBundle, today: string, lang: Lang, digits: Digits): string {
+export function budgetAnswer(data: DataBundle, today: string, lang: Lang, digits: Digits, startDay = 1): string {
   const bn = lang === "bn";
   const cats = categoryMap(data.categories);
-  const sts = budgetStatuses(data.budgets, data.transactions, monthKey(today));
+  const sts = budgetStatuses(data.budgets, data.transactions, periodKeyOf(today, startDay), startDay);
   if (!sts.length) return bn ? "এই মাসের জন্য কোনো বাজেট ঠিক করা নেই।" : "No budget is set for this month.";
   return sts
     .map((s) => {
@@ -176,19 +173,20 @@ export function balanceAnswer(data: DataBundle, lang: Lang, digits: Digits): str
 }
 
 /** প্রশ্ন বুঝতে পারলে নির্ধারিত উত্তর দেয়, না পারলে null */
-export function localAnswer(question: string, data: DataBundle, today: string, lang: Lang, digits: Digits): string | null {
+export function localAnswer(question: string, data: DataBundle, today: string, lang: Lang, digits: Digits, startDay = 1): string | null {
   const q = question.toLowerCase();
   const bn = lang === "bn";
   const last = /গত\s*মাস|last month/.test(q);
   const isToday = /আজ|today/.test(q);
-  const k = monthKey(today);
-  const pk = addMonths(k, -1);
-  let from = startOfMonth(k + "-01");
-  let to = endOfMonth(k + "-01");
+  const k = periodKeyOf(today, startDay);
+  const cur = periodRange(k, startDay);
+  const prev = periodRange(addMonths(k, -1), startDay);
+  let from = cur.from;
+  let to = cur.to;
   let label = bn ? "এই মাসে" : "this month";
   if (last) {
-    from = startOfMonth(pk + "-01");
-    to = endOfMonth(pk + "-01");
+    from = prev.from;
+    to = prev.to;
     label = bn ? "গত মাসে" : "last month";
   } else if (isToday) {
     from = to = today;
@@ -198,7 +196,7 @@ export function localAnswer(question: string, data: DataBundle, today: string, l
   if (/সবচেয়ে বেশি|সর্বোচ্চ|বেশি খরচ|highest|most|top|biggest/.test(q) && /খরচ|খাত|expense|category|spend/.test(q)) {
     return topCategoryAnswer(data, from, to, label, lang, digits);
   }
-  if (/বাজেট|budget/.test(q)) return budgetAnswer(data, today, lang, digits);
+  if (/বাজেট|budget/.test(q)) return budgetAnswer(data, today, lang, digits, startDay);
   if (/পাওনা|দেনা|ধার|debt|owe|lend|borrow/.test(q)) return debtAnswer(data, today, lang, digits);
   if (/ব্যালেন্স|balance|কত টাকা আছে|সঞ্চয়|savings/.test(q)) return balanceAnswer(data, lang, digits);
   if (/সারাংশ|মোট|খরচ|আয়|summary|total|expense|income|spend/.test(q)) {

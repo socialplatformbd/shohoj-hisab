@@ -15,8 +15,8 @@ export function useBudgetAlerts() {
       const cats = categoryMap(data.categories);
       const seen = new Set<string>();
       for (const month of new Set(months)) {
-        const b = new Map(budgetStatuses(data.budgets, before, month).map((s) => [s.budget.id, s]));
-        for (const s of budgetStatuses(data.budgets, after, month)) {
+        const b = new Map(budgetStatuses(data.budgets, before, month, settings.monthStartDay).map((s) => [s.budget.id, s]));
+        for (const s of budgetStatuses(data.budgets, after, month, settings.monthStartDay)) {
           const prev = b.get(s.budget.id);
           if (s.level === "ok" || (prev && RANK[prev.level] >= RANK[s.level])) continue;
           const name = s.budget.categoryId === null ? t("overall") : catName(cats.get(s.budget.categoryId));
@@ -35,6 +35,6 @@ export function useBudgetAlerts() {
         }
       }
     },
-    [data.budgets, data.categories, t, toast, catName, settings.budgetNotifications],
+    [data.budgets, data.categories, t, toast, catName, settings.budgetNotifications, settings.monthStartDay],
   );
 }

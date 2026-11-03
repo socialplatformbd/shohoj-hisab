@@ -6,7 +6,7 @@ import { useApp } from "@/components/AppProvider";
 import { PageHeader } from "@/components/ui";
 import { useBudgetAlerts } from "@/components/useBudgetAlerts";
 import { ExtractResponseSchema } from "@/lib/aiSchema";
-import { isValidIsoDate, monthKey, todayDhaka } from "@/lib/dates";
+import { isValidIsoDate, periodKeyOf, todayDhaka } from "@/lib/dates";
 import { db, newId } from "@/lib/db";
 import { buildFacts, localAnswer, monthSummary, todaySummary } from "@/lib/insights";
 import { parseLocalText, suggestCategoryId, type ExtractedRow } from "@/lib/localParser";
@@ -86,7 +86,7 @@ export default function AiPage() {
 /* ---------------- লেনদেন লিখে যোগ ---------------- */
 
 function EntryTab() {
-  const { t, data, catName, money, toast, confirm } = useApp();
+  const { t, data, catName, money, settings, toast, confirm } = useApp();
   const checkBudgets = useBudgetAlerts();
   const today = todayDhaka();
   const [text, setText] = useState("");
@@ -182,7 +182,7 @@ function EntryTab() {
       // শুধু এখানে, ব্যবহারকারীর নিশ্চিতকরণের পরেই ডেটাবেসে লেখা হয় (AI সরাসরি লেখে না)
       await db.transactions.bulkAdd(txs);
       toast(t("aiSavedN", { n: txs.length }));
-      checkBudgets(data.transactions, [...data.transactions, ...txs], txs.filter((x) => x.type === "expense").map((x) => monthKey(x.date)));
+      checkBudgets(data.transactions, [...data.transactions, ...txs], txs.filter((x) => x.type === "expense").map((x) => periodKeyOf(x.date, settings.monthStartDay)));
       setRows(null);
       setText("");
       setSource(null);
@@ -298,7 +298,7 @@ function EntryTab() {
 /* ---------------- প্রশ্ন করুন ---------------- */
 
 function AskTab() {
-  const { t, data, lang, digits } = useApp();
+  const { t, data, lang, digits, settings } = useApp();
   const today = todayDhaka();
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -321,13 +321,13 @@ function AskTab() {
     }
     setBusy(true);
     try {
-      const res = await callAi<{ answer?: string }>({ mode: "chat", question: text, facts: buildFacts(data, today, lang, digits), lang });
+      const res = await callAi<{ answer?: string }>({ mode: "chat", question: text, facts: buildFacts(data, today, lang, digits, settings.monthStartDay), lang });
       if (res.ok && typeof res.data.answer === "string" && res.data.answer.trim()) {
         push({ role: "assistant", text: res.data.answer, source: "ai" });
       } else {
         const reason: AiFail = res.ok ? "unavailable" : res.reason;
         const notice = reason === "offline" ? t("offlineAi") : reason === "not_configured" ? t("aiNotConfigured") : t("aiUnavailable");
-        const local = localAnswer(text, data, today, lang, digits);
+        const local = localAnswer(text, data, today, lang, digits, settings.monthStartDay);
         push({ role: "assistant", text: local ?? t("aiCannotAnswerLocal"), source: "local", notice });
       }
     } finally {
@@ -337,7 +337,7 @@ function AskTab() {
 
   const chips: { label: string; run: () => void }[] = [
     { label: t("aiQuickToday"), run: () => ask(t("aiQuickToday"), { local: () => todaySummary(data, today, lang, digits) }) },
-    { label: t("aiQuickMonth"), run: () => ask(t("aiQuickMonth"), { local: () => monthSummary(data, today, lang, digits) }) },
+    { label: t("aiQuickMonth"), run: () => ask(t("aiQuickMonth"), { local: () => monthSummary(data, today, lang, digits, settings.monthStartDay) }) },
     { label: t("aiQuickTop"), run: () => ask(lang === "bn" ? "এই মাসে আমার সবচেয়ে বেশি খরচ কোন খাতে হয়েছে?" : "Which category had my highest spending this month?") },
     { label: t("aiQuickAnalysis"), run: () => ask(lang === "bn" ? "আমার এই মাসের খরচ বিশ্লেষণ করো এবং কোথায় খরচ কমানো যায় বলো।" : "Analyse my spending this month and tell me where I can cut back.") },
     { label: t("aiQuickBudget"), run: () => ask(lang === "bn" ? "আমার খরচের ধরন দেখে আগামী মাসের জন্য বাজেট পরামর্শ দাও।" : "Suggest budgets for next month based on my spending pattern.") },

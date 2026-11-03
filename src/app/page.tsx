@@ -8,15 +8,16 @@ import { useTxForm } from "@/components/TransactionForm";
 import { TransactionDetailSheet, TransactionRow } from "@/components/TransactionParts";
 import { EmptyState, IncomeExpenseChart, ProgressBar } from "@/components/ui";
 import { budgetStatuses, debtTotals, filterRange, monthlySeries, sumTx } from "@/lib/calc";
-import { addMonths, endOfMonth, endOfWeek, endOfYear, monthKey, monthsBetween, startOfMonth, startOfWeek, startOfYear, todayDhaka } from "@/lib/dates";
+import { addMonths, endOfWeek, endOfYear, monthsBetween, periodKeyOf, periodRange, startOfMonth, startOfWeek, startOfYear, todayDhaka } from "@/lib/dates";
 import type { Transaction } from "@/lib/types";
 
 type Preset = "month" | "lastMonth" | "week" | "year" | "all" | "custom";
 
 export default function Dashboard() {
-  const { t, data, money, num, monthShort, catName, dataReady } = useApp();
+  const { t, data, money, num, monthShort, catName, settings, dataReady } = useApp();
   const form = useTxForm();
   const today = todayDhaka();
+  const startDay = settings.monthStartDay;
   const [preset, setPreset] = useState<Preset>("month");
   const [custom, setCustom] = useState<{ from: string; to: string }>({ from: startOfMonth(today), to: today });
   const [selected, setSelected] = useState<Transaction | null>(null);
@@ -24,11 +25,9 @@ export default function Dashboard() {
   const range = useMemo(() => {
     switch (preset) {
       case "month":
-        return { from: startOfMonth(today), to: endOfMonth(today) };
-      case "lastMonth": {
-        const k = addMonths(monthKey(today), -1) + "-01";
-        return { from: startOfMonth(k), to: endOfMonth(k) };
-      }
+        return periodRange(periodKeyOf(today, startDay), startDay);
+      case "lastMonth":
+        return periodRange(addMonths(periodKeyOf(today, startDay), -1), startDay);
       case "week":
         return { from: startOfWeek(today), to: endOfWeek(today) };
       case "year":
@@ -40,22 +39,23 @@ export default function Dashboard() {
       default:
         return custom.from <= custom.to ? custom : { from: custom.to, to: custom.from };
     }
-  }, [preset, today, custom, data.transactions]);
+  }, [preset, today, custom, data.transactions, startDay]);
 
   const all = useMemo(() => sumTx(data.transactions), [data.transactions]);
   const inRangeTx = useMemo(() => filterRange(data.transactions, range.from, range.to), [data.transactions, range]);
   const period = useMemo(() => sumTx(inRangeTx), [inRangeTx]);
   const debts = useMemo(() => debtTotals(data.debts, data.repayments, today), [data.debts, data.repayments, today]);
-  const budgets = useMemo(() => budgetStatuses(data.budgets, data.transactions, monthKey(today)), [data.budgets, data.transactions, today]);
+  const budgets = useMemo(() => budgetStatuses(data.budgets, data.transactions, periodKeyOf(today, startDay), startDay), [data.budgets, data.transactions, today, startDay]);
   const overall = budgets.find((b) => b.budget.categoryId === null) ?? budgets[0];
   const warnCount = budgets.filter((b) => b.level !== "ok").length;
 
   const series = useMemo(() => {
-    const toM = monthKey(range.to);
-    const n = monthsBetween(monthKey(range.from), toM) + 1;
-    const fromM = n < 6 ? addMonths(toM, -5) : n > 12 ? addMonths(toM, -11) : monthKey(range.from);
-    return monthlySeries(data.transactions, fromM, toM);
-  }, [data.transactions, range]);
+    const toM = periodKeyOf(range.to, startDay);
+    const startM = periodKeyOf(range.from, startDay);
+    const n = monthsBetween(startM, toM) + 1;
+    const fromM = n < 6 ? addMonths(toM, -5) : n > 12 ? addMonths(toM, -11) : startM;
+    return monthlySeries(data.transactions, fromM, toM, startDay);
+  }, [data.transactions, range, startDay]);
 
   const recent = useMemo(
     () => [...data.transactions].sort((a, b) => (a.date === b.date ? b.createdAt - a.createdAt : a.date < b.date ? 1 : -1)).slice(0, 6),
