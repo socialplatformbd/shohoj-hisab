@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-bg: var(--c-bg);
+  --color-card: var(--c-card);
+  --color-ink: var(--c-ink);
+  --color-muted: var(--c-muted);
+  --color-line: var(--c-line);
+  --color-soft: var(--c-soft);
+  --font-sans: "Noto Sans Bengali", "Hind Siliguri", "Kalpurush", "SolaimanLipi", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+:root {
+  --c-bg: #f1f5f9;
+  --c-card: #ffffff;
+  --c-ink: #0f172a;
+  --c-muted: #64748b;
+  --c-line: #e2e8f0;
+  --c-soft: #f1f5f9;
+  color-scheme: light;
+}
+
+.dark {
+  --c-bg: #0b1220;
+  --c-card: #131c2e;
+  --c-ink: #e5edf8;
+  --c-muted: #94a3b8;
+  --c-line: #243049;
+  --c-soft: #1a2538;
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--c-bg);
+  color: var(--c-ink);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+body {
+  font-family: var(--font-sans);
+  line-height: 1.55;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-card p-4 shadow-sm;
+  }
+  .btn {
+    @apply inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-base font-semibold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-emerald-700 text-white hover:bg-emerald-800;
+  }
+  .btn-danger {
+    @apply bg-rose-600 text-white hover:bg-rose-700;
+  }
+  .btn-ghost {
+    @apply border border-line bg-card text-ink hover:bg-soft;
+  }
+  .btn-sm {
+    @apply min-h-10 px-3 py-1.5 text-sm;
+  }
+  .input {
+    @apply min-h-12 w-full rounded-xl border border-line bg-card px-3 py-2 text-base text-ink outline-none placeholder:text-muted/70 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/25;
+  }
+  .label {
+    @apply mb-1 block text-sm font-medium text-muted;
+  }
+  .chip {
+    @apply inline-flex min-h-10 shrink-0 items-center justify-center rounded-full border border-line bg-card px-4 text-sm font-medium text-ink;
+  }
+  .chip-active {
+    @apply border-emerald-700 bg-emerald-700 text-white;
+  }
+  .field-error {
+    @apply mt-1 text-sm text-rose-600;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.sheet-anim {
+  animation: sheet-up 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-anim {
+    animation: none;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}

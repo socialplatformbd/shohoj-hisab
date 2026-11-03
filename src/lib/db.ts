@@ -1,0 +1,83 @@
+import Dexie, { type Table } from "dexie";
+import type { Budget, Category, Debt, Repayment, SettingRow, Transaction } from "./types";
+
+export const DB_NAME = "shohoj-hisab";
+export const DB_SCHEMA_VERSION = 1;
+
+export const DEFAULT_CATEGORIES: Category[] = (
+  [
+    ["cat_salary", "income", "বেতন", "Salary"],
+    ["cat_business", "income", "ব্যবসা", "Business"],
+    ["cat_freelancing", "income", "ফ্রিল্যান্সিং", "Freelancing"],
+    ["cat_other_income", "income", "অন্যান্য আয়", "Other income"],
+    ["cat_food", "expense", "খাবার", "Food"],
+    ["cat_shopping", "expense", "কেনাকাটা", "Shopping"],
+    ["cat_transport", "expense", "যাতায়াত", "Transport"],
+    ["cat_housing", "expense", "বাসা ভাড়া ও বাড়ি", "Housing"],
+    ["cat_utilities", "expense", "বিল ও ইউটিলিটি", "Utilities"],
+    ["cat_medical", "expense", "চিকিৎসা", "Medical"],
+    ["cat_education", "expense", "শিক্ষা", "Education"],
+    ["cat_entertainment", "expense", "বিনোদন", "Entertainment"],
+    ["cat_other_expense", "expense", "অন্যান্য খরচ", "Other expenses"],
+    ["cat_saving", "saving", "সাধারণ সঞ্চয়", "General savings"],
+    ["cat_saving_dps", "saving", "ডিপিএস / এফডিআর", "DPS / FDR"],
+    ["cat_saving_emergency", "saving", "জরুরি তহবিল", "Emergency fund"],
+    ["cat_withdraw", "withdraw", "সঞ্চয় উত্তোলন", "Savings withdrawal"],
+  ] as const
+).map(([id, type, name, nameEn]) => ({ id, type, name, nameEn, builtin: true, createdAt: 0 }));
+
+export const FALLBACK_CATEGORY: Record<string, string> = {
+  income: "cat_other_income",
+  expense: "cat_other_expense",
+  saving: "cat_saving",
+  withdraw: "cat_withdraw",
+};
+
+class HisabDB extends Dexie {
+  transactions!: Table<Transaction, string>;
+  categories!: Table<Category, string>;
+  budgets!: Table<Budget, string>;
+  debts!: Table<Debt, string>;
+  repayments!: Table<Repayment, string>;
+  settings!: Table<SettingRow, string>;
+
+  constructor() {
+    super(DB_NAME);
+    this.version(DB_SCHEMA_VERSION).stores({
+      transactions: "id, type, categoryId, date, createdAt",
+      categories: "id, type",
+      budgets: "id, month, categoryId",
+      debts: "id, kind, date",
+      repayments: "id, debtId",
+      settings: "key",
+    });
+    this.on("populate", (tx) => {
+      tx.table("categories").bulkAdd(DEFAULT_CATEGORIES);
+    });
+  }
+}
+
+export const db = new HisabDB();
+
+export function newId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `id_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function getSetting<T extends SettingRow["value"]>(key: string): Promise<T | undefined> {
+  const row = await db.settings.get(key);
+  return row?.value as T | undefined;
+}
+
+export async function setSetting(key: string, value: SettingRow["value"]): Promise<void> {
+  await db.settings.put({ key, value });
+}
+
+/** সব ডেটা মুছে ডিফল্ট খাত আবার বসায় (ওয়েলকাম-স্ক্রিনের অবস্থা অক্ষত থাকে) */
+export async function eraseAllData(): Promise<void> {
+  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.settings], async () => {
+    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear()]);
+    await db.categories.bulkAdd(DEFAULT_CATEGORIES);
+    await db.settings.delete("lastBackupAt");
+  });
+}

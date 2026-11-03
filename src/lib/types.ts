@@ -1,0 +1,66 @@
+export type TxType = "income" | "expense" | "saving" | "withdraw";
+export type DebtKind = "lent" | "borrowed";
+export type Lang = "bn" | "en";
+export type Digits = "bn" | "en";
+export type Theme = "light" | "dark" | "system";
+
+/** সব টাকার অঙ্ক paisa (পূর্ণসংখ্যা) হিসাবে রাখা হয়। ১ টাকা = ১০০ পয়সা */
+export interface Transaction {
+  id: string;
+  type: TxType;
+  amount: number;
+  categoryId: string;
+  date: string; // YYYY-MM-DD (Asia/Dhaka)
+  description?: string;
+  paymentMethod?: string;
+  note?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Category {
+  id: string;
+  type: TxType;
+  name: string;
+  nameEn?: string;
+  builtin: boolean;
+  createdAt: number;
+}
+
+export interface Budget {
+  id: string;
+  month: string; // YYYY-MM
+  categoryId: string | null; // null = সামগ্রিক বাজেট
+  amount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Debt {
+  id: string;
+  person: string;
+  amount: number;
+  kind: DebtKind; // lent = আমি ধার দিয়েছি (পাব), borrowed = আমি ধার নিয়েছি (দেব)
+  date: string;
+  dueDate?: string;
+  description?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Repayment {
+  id: string;
+  debtId: string;
+  amount: number;
+  date: string;
+  note?: string;
+  createdAt: number;
+}
+
+export interface SettingRow {
+  key: string;
+  value: string | number | boolean | null;
+}
+
+export const TX_TYPES: TxType[] = ["income", "expense", "saving", "withdraw"];
+export const PAYMENT_METHODS = ["cash", "bkash", "nagad", "rocket", "bank", "card", "other"] as const;

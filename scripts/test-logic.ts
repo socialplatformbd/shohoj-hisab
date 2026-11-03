@@ -1,0 +1,268 @@
+// চালানো: npx tsx scripts/test-logic.ts
+import "fake-indexeddb/auto";
+import assert from "node:assert/strict";
+import { formatMoney, parseAmountToPaisa, numberToPaisa, percentOf } from "../src/lib/money";
+import { addDays, endOfMonth, startOfWeek, todayDhaka, isValidIsoDate, BN_MONTHS_SHORT, EN_MONTHS_SHORT } from "../src/lib/dates";
+import { budgetStatuses, debtTotals, sumTx, categoryBreakdown, summarizeDebt } from "../src/lib/calc";
+import { parseLocalText } from "../src/lib/localParser";
+import { DEFAULT_CATEGORIES, db, newId, eraseAllData } from "../src/lib/db";
+import { buildBackup, validateBackupText, restoreBackup, BackupError } from "../src/lib/backup";
+import { transactionsToCsv, parseTransactionsCsv } from "../src/lib/csv";
+import { ExtractResponseSchema } from "../src/lib/aiSchema";
+import { localAnswer } from "../src/lib/insights";
+import type { Transaction, Debt, Repayment, Budget } from "../src/lib/types";
+
+let n = 0;
+const ok = (name: string, fn: () => void | Promise<void>) =>
+  Promise.resolve(fn()).then(() => console.log("  ✓", name), (e) => { console.error("  ✗", name, "\n", e); process.exitCode = 1; }).finally(() => n++);
+
+const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expense", amount: 100, categoryId: "cat_food", date: "2026-05-10", createdAt: 1, updatedAt: 1, ...p });
+
+(async () => {
+  console.log("টাকা");
+  await ok("parse amounts (bn/en digits, commas)", () => {
+    assert.equal(parseAmountToPaisa("১,৫০০"), 150000);
+    assert.equal(parseAmountToPaisa("1500.5"), 150050);
+    assert.equal(parseAmountToPaisa("0.1"), 10);
+    assert.equal(parseAmountToPaisa("0"), null);
+    assert.equal(parseAmountToPaisa("-5"), null);
+    assert.equal(parseAmountToPaisa("1.234"), null);
+    assert.equal(parseAmountToPaisa("abc"), null);
+    assert.equal(parseAmountToPaisa("1e5"), null);
+    assert.equal(numberToPaisa(0.1 + 0.2), 30);
+  });
+  await ok("format money", () => {
+    assert.equal(formatMoney(150000, "bn"), "৳ ১,৫০০.০০");
+    assert.equal(formatMoney(150000, "en"), "৳ 1,500.00");
+    assert.equal(formatMoney(12345678900, "en"), "৳ 12,34,56,789.00");
+    assert.equal(formatMoney(-5, "en"), "-৳ 0.05");
+    assert.equal(percentOf(1, 3), 33);
+  });
+  console.log("তারিখ");
+  await ok("dates", () => {
+    assert.ok(isValidIsoDate(todayDhaka()));
+    assert.equal(addDays("2026-02-28", 1), "2026-03-01");
+    assert.equal(endOfMonth("2024-02-10"), "2024-02-29");
+    assert.equal(startOfWeek("2026-05-15"), "2026-05-09"); // শুক্রবার → আগের শনিবার
+    assert.equal(startOfWeek("2026-05-16"), "2026-05-16"); // শনিবার
+    assert.ok(!isValidIsoDate("2026-02-30"));
+  });
+  await ok("ছোট মাসের নাম (বাংলা যুক্তাক্ষর কাটা হয় না)", () => {
+    assert.equal(BN_MONTHS_SHORT.length, 12);
+    assert.equal(EN_MONTHS_SHORT.length, 12);
+    assert.ok(BN_MONTHS_SHORT.every((m) => m.length > 0 && !m.endsWith("\u09CD")));
+  });
+
+  console.log("হিসাব (আয়/খরচ/ড্যাশবোর্ড/রিপোর্ট)");
+  const txs = [
+    tx({ type: "income", amount: 5000000, categoryId: "cat_salary" }),
+    tx({ amount: 50000 }),
+    tx({ amount: 8000, categoryId: "cat_transport" }),
+    tx({ amount: 12000 }),
+    tx({ type: "saving", amount: 100000, categoryId: "cat_saving" }),
+    tx({ type: "withdraw", amount: 20000, categoryId: "cat_withdraw" }),
+    tx({ amount: 99900, date: "2026-04-30" }),
+  ];
+  await ok("totals", () => {
+    const s = sumTx(txs);
+    assert.equal(s.income, 5000000);
+    assert.equal(s.expense, 50000 + 8000 + 12000 + 99900);
+    assert.equal(s.savings, 80000);
+    assert.equal(s.balance, 5000000 - 169900 - 100000 + 20000);
+  });
+  await ok("category breakdown", () => {
+    const b = categoryBreakdown(txs.filter((t) => t.date.startsWith("2026-05")), "expense");
+    assert.equal(b[0].categoryId, "cat_food");
+    assert.equal(b[0].total, 62000);
+    assert.equal(b[0].percent, 88);
+  });
+  await ok("budget", () => {
+    const budgets: Budget[] = [
+      { id: "b1", month: "2026-05", categoryId: null, amount: 100000, createdAt: 1, updatedAt: 1 },
+      { id: "b2", month: "2026-05", categoryId: "cat_food", amount: 60000, createdAt: 1, updatedAt: 1 },
+    ];
+    const st = budgetStatuses(budgets, txs, "2026-05");
+    const overall = st.find((s) => s.budget.id === "b1")!;
+    assert.equal(overall.spent, 70000);
+    assert.equal(overall.remaining, 30000);
+    assert.equal(overall.percent, 70);
+    assert.equal(overall.level, "ok");
+    const food = st.find((s) => s.budget.id === "b2")!;
+    assert.equal(food.spent, 62000);
+    assert.equal(food.level, "over");
+  });
+  await ok("debts & repayments", () => {
+    const d: Debt = { id: "d1", person: "রহিম", amount: 100000, kind: "lent", date: "2026-05-01", dueDate: "2026-05-05", createdAt: 1, updatedAt: 1 };
+    const d2: Debt = { id: "d2", person: "করিম", amount: 50000, kind: "borrowed", date: "2026-05-01", createdAt: 1, updatedAt: 1 };
+    const reps: Repayment[] = [
+      { id: "r1", debtId: "d1", amount: 30000, date: "2026-05-02", createdAt: 1 },
+      { id: "r2", debtId: "d1", amount: 20000, date: "2026-05-03", createdAt: 2 },
+    ];
+    const s = summarizeDebt(d, reps, "2026-05-10");
+    assert.equal(s.paid, 50000);
+    assert.equal(s.remaining, 50000);
+    assert.equal(s.status, "partial");
+    assert.ok(s.overdue);
+    const tot = debtTotals([d, d2], reps, "2026-05-10");
+    assert.equal(tot.receivable, 50000);
+    assert.equal(tot.payable, 50000);
+    reps.push({ id: "r3", debtId: "d1", amount: 50000, date: "2026-05-04", createdAt: 3 });
+    assert.equal(summarizeDebt(d, reps, "2026-05-10").status, "paid");
+  });
+
+  console.log("AI (স্থানীয় ফলব্যাক পার্সার ও স্কিমা)");
+  const cats = DEFAULT_CATEGORIES;
+  await ok("বাংলা বাক্য থেকে ৩টি খরচ", () => {
+    const rows = parseLocalText("আজ বাজারে ৫০০ টাকা, রিকশা ভাড়া ৮০ টাকা আর দুপুরে খাবারে ১২০ টাকা খরচ করেছি।", cats, "2026-05-10");
+    console.log("    →", rows.map((r) => `${r.title}:${r.amount / 100}:${r.categoryId}`).join(" | "));
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows.map((r) => r.amount), [50000, 8000, 12000]);
+    assert.deepEqual(rows.map((r) => r.title), ["বাজার", "রিকশা ভাড়া", "দুপুরের খাবার"]);
+    assert.ok(rows.every((r) => r.type === "expense" && r.date === "2026-05-10"));
+    assert.deepEqual(rows.map((r) => r.categoryId), ["cat_food", "cat_transport", "cat_food"]);
+  });
+  await ok("আয় চিহ্নিত", () => {
+    const rows = parseLocalText("আজ বেতন পেয়েছি ২৫০০০ টাকা", cats, "2026-05-10");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].type, "income");
+    assert.equal(rows[0].categoryId, "cat_salary");
+  });
+  await ok("কোনো অঙ্ক নেই → খালি", () => assert.equal(parseLocalText("আজ কিছু হয়নি", cats, "2026-05-10").length, 0));
+  await ok("৳ চিহ্নসহ পুরো সংখ্যা (৳৫০০ → ৫০০, ৫ নয়)", () => {
+    const r = parseLocalText("৳৫০০ চা", cats, "2026-05-10");
+    assert.equal(r.length, 1);
+    assert.equal(r[0].amount, 50000);
+    assert.equal(parseLocalText("৳ 1,200.50 বাজার", cats, "2026-05-10")[0].amount, 120050);
+  });
+  await ok("ইংরেজি বাক্যে একই লেবেল দুইবার আসে না", () => {
+    const r = parseLocalText("500 tk lunch and 200 tk bus", cats, "2026-05-10");
+    assert.deepEqual(r.map((x) => x.title), ["lunch", "bus"]);
+    assert.deepEqual(r.map((x) => x.categoryId), ["cat_food", "cat_transport"]);
+  });
+  await ok("আয় ও খরচ মেশানো বাক্যে ধরন আলাদা", () => {
+    const r = parseLocalText("বেতন পেয়েছি ২৫০০০ টাকা এবং বাজার ৫০০ টাকা", cats, "2026-05-10");
+    assert.deepEqual(r.map((x) => x.type), ["income", "expense"]);
+  });
+  await ok("AI আউটপুট স্কিমা কঠোর", () => {
+    assert.ok(ExtractResponseSchema.safeParse({ items: [{ type: "expense", title: "বাজার", amount: 500, categoryId: "cat_food", date: "2026-05-10" }] }).success);
+    assert.ok(!ExtractResponseSchema.safeParse({ items: [{ type: "expense", title: "বাজার", amount: -5 }] }).success);
+    assert.ok(!ExtractResponseSchema.safeParse({ items: [{ type: "gift", title: "x", amount: 5 }] }).success);
+    assert.ok(!ExtractResponseSchema.safeParse({ items: [{ type: "expense", title: "x", amount: "500" }] }).success);
+    assert.ok(!ExtractResponseSchema.safeParse({ items: [{ type: "expense", title: "x", amount: 5, date: "2026-13-40" }] }).success);
+    assert.ok(!ExtractResponseSchema.safeParse({ foo: 1 }).success);
+  });
+  await ok("প্রশ্নের স্থানীয় উত্তর (সবচেয়ে বেশি খরচ)", () => {
+    const ans = localAnswer("এই মাসে আমার সবচেয়ে বেশি খরচ কোন খাতে হয়েছে?", { transactions: txs, categories: cats, budgets: [], debts: [], repayments: [] }, "2026-05-20", "bn", "bn");
+    console.log("    →", ans);
+    assert.ok(ans && ans.includes("খাবার") && ans.includes("৬২০.০০"));
+  });
+
+  console.log("CSV");
+  await ok("export → import round trip", () => {
+    const withText = [tx({ description: 'বাজার, "কাঁচা" সবজি', note: "=1+1", amount: 12345 })];
+    const csv = transactionsToCsv(withText, cats);
+    assert.ok(csv.includes("'=1+1"));
+    const r = parseTransactionsCsv(csv, cats, 5);
+    assert.equal(r.bad, 0);
+    assert.equal(r.transactions.length, 1);
+    assert.equal(r.transactions[0].amount, 12345);
+    assert.equal(r.transactions[0].description, 'বাজার, "কাঁচা" সবজি');
+    assert.equal(r.transactions[0].note, "=1+1");
+    const bad = parseTransactionsCsv("date,type,category,amount\n2026-05-01,expense,খাবার,-5\n2026-05-01,expense,খাবার,50\n", cats, 5);
+    assert.equal(bad.bad, 1);
+    assert.equal(bad.transactions.length, 1);
+  });
+
+  await ok("CSV: একই নতুন খাত বারবার তৈরি হয় না", () => {
+    const long = "ক".repeat(60);
+    const r = parseTransactionsCsv(`date,type,category,amount\n2026-05-01,expense,${long},10\n2026-05-02,expense,${long},20\n2026-05-03,expense,Zakat,5\n2026-05-04,expense,zakat,5\n`, cats, 5);
+    assert.equal(r.newCategories.length, 2);
+    assert.equal(r.transactions.length, 4);
+  });
+
+  console.log("IndexedDB: যোগ/সম্পাদনা/মুছা, ব্যাকআপ ও রিস্টোর");
+  await db.open();
+  await ok("ডিফল্ট খাত seed হয়েছে", async () => assert.equal(await db.categories.count(), DEFAULT_CATEGORIES.length));
+  const a = tx({ amount: 11100, description: "চা" });
+  await ok("add / edit / delete", async () => {
+    await db.transactions.add(a);
+    assert.equal((await db.transactions.get(a.id))?.amount, 11100);
+    await db.transactions.put({ ...a, amount: 22200, updatedAt: 99 });
+    assert.equal((await db.transactions.get(a.id))?.amount, 22200);
+    await db.transactions.delete(a.id);
+    assert.equal(await db.transactions.count(), 0);
+  });
+  const d: Debt = { id: "dd", person: "সালমা", amount: 70000, kind: "lent", date: "2026-05-01", createdAt: 1, updatedAt: 1 };
+  await db.transactions.bulkAdd(txs);
+  await db.debts.add(d);
+  await db.repayments.add({ id: "rr", debtId: "dd", amount: 20000, date: "2026-05-02", createdAt: 2 });
+  await db.budgets.add({ id: "bb", month: "2026-05", categoryId: null, amount: 90000, createdAt: 1, updatedAt: 1 });
+  await db.settings.put({ key: "userName", value: "রাকিব" });
+  await db.settings.put({ key: "welcomeDone", value: true });
+  let text = "";
+  await ok("ব্যাকআপ তৈরি ও যাচাই", async () => {
+    const b = await buildBackup();
+    text = JSON.stringify(b);
+    assert.equal(b.version, 1);
+    assert.equal(b.data.transactions.length, txs.length);
+    assert.ok(!b.data.settings.some((s) => s.key === "welcomeDone"));
+    const v = validateBackupText(text);
+    assert.equal(v.data.debts.length, 1);
+  });
+  await ok("ত্রুটিপূর্ণ ব্যাকআপ প্রত্যাখ্যাত", () => {
+    const rej = (s: string, code = "invalid") => assert.throws(() => validateBackupText(s), (e: unknown) => e instanceof BackupError && e.code === code);
+    rej("not json");
+    rej("{}");
+    rej(JSON.stringify({ app: "other", version: 1 }));
+    rej(JSON.stringify({ ...JSON.parse(text), version: 99 }), "newer");
+    const j = JSON.parse(text);
+    j.data.transactions[0].amount = -5;
+    rej(JSON.stringify(j));
+    const j2 = JSON.parse(text);
+    j2.data.transactions[0].categoryId = "nope";
+    rej(JSON.stringify(j2));
+    const j3 = JSON.parse(text);
+    j3.data.repayments[0].amount = 999999999;
+    rej(JSON.stringify(j3));
+    const j4 = JSON.parse(text);
+    j4.data.transactions.push(j4.data.transactions[0]);
+    rej(JSON.stringify(j4));
+  });
+  await ok("রিস্টোর: ডেটা মুছে ফিরিয়ে আনা", async () => {
+    await eraseAllData();
+    await db.settings.clear();
+    assert.equal(await db.transactions.count(), 0);
+    await restoreBackup(validateBackupText(text));
+    assert.equal(await db.transactions.count(), txs.length);
+    assert.equal(await db.debts.count(), 1);
+    assert.equal(await db.repayments.count(), 1);
+    assert.equal(await db.budgets.count(), 1);
+    assert.equal((await db.settings.get("userName"))?.value, "রাকিব");
+    const again = await buildBackup();
+    assert.equal(JSON.stringify(again.data.transactions.sort((x, y) => x.id.localeCompare(y.id))), JSON.stringify(JSON.parse(text).data.transactions.sort((x: Transaction, y: Transaction) => x.id.localeCompare(y.id))));
+  });
+  await ok("রিস্টোর মাঝপথে ব্যর্থ হলে আগের ডেটা অক্ষত (rollback)", async () => {
+    const before = await db.transactions.count();
+    const bad = validateBackupText(text);
+    // ইচ্ছাকৃতভাবে ক্ষতিগ্রস্ত: duplicate key ঢুকিয়ে bulkAdd ব্যর্থ করানো (যাচাইয়ের পরের ধাপ)
+    bad.data.transactions.push({ ...bad.data.transactions[0] });
+    await assert.rejects(() => restoreBackup(bad));
+    assert.equal(await db.transactions.count(), before);
+    assert.equal(await db.debts.count(), 1);
+  });
+
+  await ok("অচেনা পেমেন্ট মাধ্যমসহ ব্যাকআপ প্রত্যাখ্যাত", () => {
+    const b = JSON.parse(text);
+    b.data.transactions[0].paymentMethod = "xyz";
+    assert.throws(() => validateBackupText(JSON.stringify(b)), (e: unknown) => e instanceof BackupError && e.code === "invalid");
+  });
+  await ok("ব্যাকআপে ডিফল্ট খাত না থাকলেও রিস্টোরের পর সব ডিফল্ট খাত থাকে", async () => {
+    const b = JSON.parse(text);
+    const used = new Set(b.data.transactions.map((t: Transaction) => t.categoryId));
+    b.data.categories = b.data.categories.filter((c: { id: string }) => used.has(c.id));
+    await restoreBackup(validateBackupText(JSON.stringify(b)));
+    assert.equal(await db.categories.count(), DEFAULT_CATEGORIES.length);
+  });
+
+  console.log(`\nসম্পন্ন: ${n} টি পরীক্ষা চলেছে`, process.exitCode ? "— ব্যর্থতা আছে ✗" : "— সব পাস ✓");
+})();
