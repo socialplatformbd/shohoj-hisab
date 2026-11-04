@@ -25,6 +25,7 @@ export const TransactionSchema = z.object({
     .string()
     .refine((m) => (PAYMENT_METHODS as readonly string[]).includes(m), "invalid payment method")
     .optional(),
+  accountId: id.optional(),
   note: z.string().max(2000).optional(),
   createdAt: ts,
   updatedAt: ts,
@@ -74,12 +75,30 @@ export const RecurringSchema = z.object({
     .string()
     .refine((m) => (PAYMENT_METHODS as readonly string[]).includes(m), "invalid payment method")
     .optional(),
+  accountId: id.optional(),
   dayOfMonth: z.number().int().min(1).max(31),
   startMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
   lastMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
   active: z.boolean(),
   createdAt: ts,
   updatedAt: ts,
+});
+export const AccountSchema = z.object({
+  id,
+  name: z.string().min(1).max(40),
+  kind: z.string().refine((m) => (PAYMENT_METHODS as readonly string[]).includes(m), "invalid kind"),
+  openingBalance: z.number().int().min(0).max(MAX_PAISA),
+  createdAt: ts,
+  updatedAt: ts,
+});
+export const TransferSchema = z.object({
+  id,
+  fromAccountId: id,
+  toAccountId: id,
+  amount: paisa,
+  date,
+  note: z.string().max(500).optional(),
+  createdAt: ts,
 });
 export const SettingSchema = z.object({
   key: z.string().min(1).max(60),
@@ -98,6 +117,8 @@ export const BackupSchema = z.object({
     debts: z.array(DebtSchema),
     repayments: z.array(RepaymentSchema),
     recurring: z.array(RecurringSchema).default([]), // পুরনো ব্যাকআপে এই অংশ নেই
+    accounts: z.array(AccountSchema).default([]),
+    transfers: z.array(TransferSchema).default([]),
     settings: z.array(SettingSchema),
   }),
 });
@@ -108,14 +129,16 @@ export type BackupFile = z.infer<typeof BackupSchema>;
 const PREFERENCE_KEYS = ["userName", "language", "digits", "theme", "budgetNotifications", "monthStartDay"];
 
 export async function buildBackup(): Promise<BackupFile> {
-  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.settings], async () => {
-    const [transactions, categories, budgets, debts, repayments, recurring, settings] = await Promise.all([
+  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.settings], async () => {
+    const [transactions, categories, budgets, debts, repayments, recurring, accounts, transfers, settings] = await Promise.all([
       db.transactions.toArray(),
       db.categories.toArray(),
       db.budgets.toArray(),
       db.debts.toArray(),
       db.repayments.toArray(),
       db.recurring.toArray(),
+      db.accounts.toArray(),
+      db.transfers.toArray(),
       db.settings.toArray(),
     ]);
     return {
@@ -130,6 +153,8 @@ export async function buildBackup(): Promise<BackupFile> {
         debts,
         repayments,
         recurring,
+        accounts,
+        transfers,
         settings: settings.filter((s) => PREFERENCE_KEYS.includes(s.key)),
       },
     };
@@ -171,7 +196,9 @@ export function validateBackupText(text: string): BackupFile {
     dupes(data.budgets.map((x) => x.id)) ||
     dupes(data.debts.map((x) => x.id)) ||
     dupes(data.repayments.map((x) => x.id)) ||
-    dupes(data.recurring.map((x) => x.id))
+    dupes(data.recurring.map((x) => x.id)) ||
+    dupes(data.accounts.map((x) => x.id)) ||
+    dupes(data.transfers.map((x) => x.id))
   ) {
     throw new BackupError("invalid");
   }
@@ -180,6 +207,10 @@ export function validateBackupText(text: string): BackupFile {
   if (data.transactions.some((t) => !catIds.has(t.categoryId))) throw new BackupError("invalid");
   if (data.budgets.some((b) => b.categoryId !== null && !catIds.has(b.categoryId))) throw new BackupError("invalid");
   if (data.recurring.some((r) => !catIds.has(r.categoryId))) throw new BackupError("invalid");
+  const accIds = new Set(data.accounts.map((a) => a.id));
+  if (data.transactions.some((t) => t.accountId !== undefined && !accIds.has(t.accountId))) throw new BackupError("invalid");
+  if (data.recurring.some((r) => r.accountId !== undefined && !accIds.has(r.accountId))) throw new BackupError("invalid");
+  if (data.transfers.some((x) => !accIds.has(x.fromAccountId) || !accIds.has(x.toAccountId) || x.fromAccountId === x.toAccountId)) throw new BackupError("invalid");
   const paidBy = new Map<string, number>();
   for (const r of data.repayments) {
     if (!debtById.has(r.debtId)) throw new BackupError("invalid");
@@ -194,8 +225,8 @@ export function validateBackupText(text: string): BackupFile {
 /** একটি ট্রানজ্যাকশনে সব বদলায় — মাঝপথে ব্যর্থ হলে আগের ডেটা অক্ষত থাকে */
 export async function restoreBackup(file: BackupFile): Promise<void> {
   const d = file.data;
-  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.settings], async () => {
-    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear()]);
+  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.settings], async () => {
+    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear()]);
     await db.categories.bulkAdd(d.categories);
     // ডিফল্ট খাত (যেমন "অন্যান্য খরচ") ব্যাকআপে না থাকলেও যেন থাকে — নইলে AI/ফলব্যাক এমন খাতে লেখে যা নেই
     const have = new Set(d.categories.map((c) => c.id));
@@ -206,6 +237,8 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
     await db.debts.bulkAdd(d.debts);
     await db.repayments.bulkAdd(d.repayments);
     await db.recurring.bulkAdd(d.recurring);
+    await db.accounts.bulkAdd(d.accounts);
+    await db.transfers.bulkAdd(d.transfers);
     await db.settings.bulkPut(d.settings);
   });
 }

@@ -121,6 +121,7 @@ function RecurringSheet({ rule, onClose }: { rule?: Recurring; onClose: () => vo
   const [dayText, setDayText] = useState(rule ? String(rule.dayOfMonth) : "1");
   const [description, setDescription] = useState(rule?.description ?? "");
   const [method, setMethod] = useState(rule?.paymentMethod ?? "");
+  const [accountId, setAccountId] = useState(rule?.accountId ?? "");
   const [errors, setErrors] = useState<{ amount?: string; day?: string; description?: string }>({});
   const [busy, setBusy] = useState(false);
 
@@ -148,6 +149,7 @@ function RecurringSheet({ rule, onClose }: { rule?: Recurring; onClose: () => vo
         categoryId: cats.some((c) => c.id === categoryId) ? categoryId : FALLBACK_CATEGORY[type],
         description: description.trim() || undefined,
         paymentMethod: method || undefined,
+        accountId: data.accounts.some((a) => a.id === accountId) ? accountId : undefined,
         dayOfMonth: dayNum,
       };
       if (rule) {
@@ -210,6 +212,18 @@ function RecurringSheet({ rule, onClose }: { rule?: Recurring; onClose: () => vo
         <Field label={t("description")} optional error={errors.description}>
           <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
+        {data.accounts.length > 0 && (
+          <Field label={t("accountField")} optional>
+            <select className="input" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              <option value="">—</option>
+              {data.accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <Field label={t("paymentMethod")} optional>
           <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
             <option value="">—</option>

@@ -53,6 +53,14 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
   const [date, setDate] = useState(editing?.date ?? todayDhaka());
   const [description, setDescription] = useState(editing?.description ?? "");
   const [paymentMethod, setPaymentMethod] = useState(editing?.paymentMethod ?? "");
+  const [accountId, setAccountId] = useState(() => {
+    if (editing) return editing.accountId ?? "";
+    // নতুন লেনদেনে সর্বশেষ ব্যবহৃত অ্যাকাউন্টটি আগে থেকে বসানো থাকে
+    let last: Transaction | undefined;
+    for (const x of data.transactions) if (x.accountId && (!last || x.createdAt > last.createdAt)) last = x;
+    const id = last?.accountId;
+    return id && data.accounts.some((a) => a.id === id) ? id : "";
+  });
   const [note, setNote] = useState(editing?.note ?? "");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -87,6 +95,7 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
     setBusy(true);
     try {
       const now = Date.now();
+      const account = data.accounts.find((a) => a.id === accountId);
       const tx: Transaction = {
         id: editing?.id ?? newId(),
         type,
@@ -94,7 +103,8 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
         categoryId: catId,
         date,
         description: description.trim() || undefined,
-        paymentMethod: paymentMethod || undefined,
+        paymentMethod: paymentMethod || account?.kind || undefined,
+        accountId: account?.id,
         note: note.trim() || undefined,
         createdAt: editing?.createdAt ?? now,
         updatedAt: now,
@@ -179,6 +189,19 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
         <Field label={t("description")} optional error={errors.description}>
           <input className="input" value={description} maxLength={200} onChange={(e) => setDescription(e.target.value)} />
         </Field>
+
+        {data.accounts.length > 0 && (
+          <Field label={t("accountField")} optional>
+            <select className="input" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              <option value="">—</option>
+              {data.accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
 
         <Field label={t("paymentMethod")} optional>
           <select className="input" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>

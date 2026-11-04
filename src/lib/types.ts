@@ -13,9 +13,31 @@ export interface Transaction {
   date: string; // YYYY-MM-DD (Asia/Dhaka)
   description?: string;
   paymentMethod?: string;
+  accountId?: string; // কোন অ্যাকাউন্টে (ঐচ্ছিক)
   note?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/** নগদ, বিকাশ, ব্যাংক ইত্যাদি — আলাদা ব্যালেন্সসহ অ্যাকাউন্ট */
+export interface Account {
+  id: string;
+  name: string;
+  kind: string; // PAYMENT_METHODS-এর একটি
+  openingBalance: number; // paisa, ০ বা বেশি
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** এক অ্যাকাউন্ট থেকে অন্যটিতে টাকা সরানো — আয়/খরচ নয় */
+export interface Transfer {
+  id: string;
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  date: string;
+  note?: string;
+  createdAt: number;
 }
 
 export interface Category {
@@ -65,6 +87,7 @@ export interface Recurring {
   categoryId: string;
   description?: string;
   paymentMethod?: string;
+  accountId?: string;
   dayOfMonth: number; // ১–৩১ (ছোট মাসে মাসের শেষ দিন)
   startMonth: string; // YYYY-MM — যে মাস থেকে চালু
   lastMonth?: string; // YYYY-MM — সর্বশেষ যে মাসের লেনদেন তৈরি হয়েছে

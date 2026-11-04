@@ -46,10 +46,11 @@ export function defaultStartMonth(day: number, today: string): string {
  * ব্যবহারকারী আগে তৈরি হওয়া লেনদেন সম্পাদনা বা মুছলে সেটি আর ফিরে আসে না।
  */
 export async function generateRecurring(today: string): Promise<number> {
-  return db.transaction("rw", [db.recurring, db.transactions, db.categories], async () => {
+  return db.transaction("rw", [db.recurring, db.transactions, db.categories, db.accounts], async () => {
     const rules = await db.recurring.toArray();
     if (rules.length === 0) return 0;
     const catIds = new Set((await db.categories.toArray()).map((c) => c.id));
+    const accountIds = new Set((await db.accounts.toArray()).map((a) => a.id));
     let created = 0;
     for (const rule of rules) {
       const due = dueOccurrences(rule, today);
@@ -68,6 +69,7 @@ export async function generateRecurring(today: string): Promise<number> {
           date: o.date,
           description: rule.description,
           paymentMethod: rule.paymentMethod,
+          accountId: rule.accountId && accountIds.has(rule.accountId) ? rule.accountId : undefined,
           createdAt: now,
           updatedAt: now,
         });

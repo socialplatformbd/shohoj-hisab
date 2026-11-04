@@ -13,7 +13,8 @@ import { ExtractResponseSchema } from "../src/lib/aiSchema";
 import { localAnswer } from "../src/lib/insights";
 import { dueOccurrences, defaultStartMonth, generateRecurring, occurrenceId, scheduledDate } from "../src/lib/recurring";
 import { PIN_RE, hashPin, makeSalt, normalizePin, verifyPin } from "../src/lib/pin";
-import type { Transaction, Debt, Repayment, Budget, Recurring } from "../src/lib/types";
+import { accountSummary } from "../src/lib/accounts";
+import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer } from "../src/lib/types";
 
 let n = 0;
 const ok = (name: string, fn: () => void | Promise<void>) =>
@@ -350,6 +351,60 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
   await ok("সব ডেটা মুছলে নিয়মিত লেনদেনও যায়", async () => {
     await eraseAllData();
     assert.equal(await db.recurring.count(), 0);
+  });
+
+  console.log("অ্যাকাউন্ট ও ট্রান্সফার");
+  await ok("অ্যাকাউন্ট ব্যালেন্স ও ট্রান্সফার (মোট অঙ্ক অপরিবর্তিত)", () => {
+    const acc = (id: string, open: number): Account => ({ id, name: id, kind: "cash", openingBalance: open, createdAt: 1, updatedAt: 1 });
+    const accounts = [acc("cash", 100000), acc("bank", 500000)];
+    const txs = [
+      tx({ type: "income", amount: 800000, accountId: "bank" }),
+      tx({ type: "expense", amount: 20000, accountId: "cash" }),
+      tx({ type: "saving", amount: 50000, accountId: "bank" }),
+      tx({ type: "withdraw", amount: 10000, accountId: "bank" }),
+      tx({ type: "expense", amount: 5000 }),
+    ];
+    const transfers: Transfer[] = [{ id: "t1", fromAccountId: "bank", toAccountId: "cash", amount: 100000, date: "2026-11-04", createdAt: 1 }];
+    const sm = accountSummary(accounts, txs, transfers);
+    const by = Object.fromEntries(sm.rows.map((r) => [r.account.id, r.balance]));
+    assert.equal(by.cash, 100000 - 20000 + 100000);
+    assert.equal(by.bank, 500000 + 800000 - 50000 + 10000 - 100000);
+    assert.equal(sm.unassigned, -5000);
+    assert.equal(sm.total, 600000 + sumTx(txs).balance);
+  });
+  await ok("ব্যাকআপে অ্যাকাউন্ট, ট্রান্সফার ও লেনদেনের accountId যায়-ফেরে", async () => {
+    await eraseAllData();
+    const now = Date.now();
+    await db.accounts.bulkAdd([
+      { id: "a1", name: "নগদ", kind: "cash", openingBalance: 100000, createdAt: now, updatedAt: now },
+      { id: "a2", name: "ব্যাংক", kind: "bank", openingBalance: 0, createdAt: now, updatedAt: now },
+    ]);
+    await db.transactions.add({ ...tx({ type: "income", amount: 500000 }), id: "ax1", accountId: "a2" });
+    await db.transfers.add({ id: "tr1", fromAccountId: "a2", toAccountId: "a1", amount: 100000, date: "2026-11-04", createdAt: now });
+    const text3 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    await restoreBackup(validateBackupText(text3));
+    assert.equal(await db.accounts.count(), 2);
+    assert.equal(await db.transfers.count(), 1);
+    assert.equal((await db.transactions.get("ax1"))?.accountId, "a2");
+    // অচেনা অ্যাকাউন্ট বা নিজের কাছে ট্রান্সফার প্রত্যাখ্যাত
+    const bad = JSON.parse(text3);
+    bad.data.transactions[0].accountId = "nope";
+    assert.throws(() => validateBackupText(JSON.stringify(bad)), (e: unknown) => e instanceof BackupError);
+    const bad2 = JSON.parse(text3);
+    bad2.data.transfers[0].toAccountId = bad2.data.transfers[0].fromAccountId;
+    assert.throws(() => validateBackupText(JSON.stringify(bad2)), (e: unknown) => e instanceof BackupError);
+    // পুরনো ব্যাকআপ (accounts/transfers ছাড়া) চলে
+    const old = JSON.parse(text3);
+    delete old.data.accounts;
+    delete old.data.transfers;
+    for (const x of old.data.transactions) delete x.accountId;
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.accounts, []);
+  });
+  await ok("সব ডেটা মুছলে অ্যাকাউন্টও যায়", async () => {
+    await eraseAllData();
+    assert.equal(await db.accounts.count(), 0);
+    assert.equal(await db.transfers.count(), 0);
   });
 
   console.log(`\nসম্পন্ন: ${n} টি পরীক্ষা চলেছে`, process.exitCode ? "— ব্যর্থতা আছে ✗" : "— সব পাস ✓");
