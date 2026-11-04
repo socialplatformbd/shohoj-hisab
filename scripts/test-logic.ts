@@ -7,7 +7,8 @@ import { budgetStatuses, debtTotals, sumTx, categoryBreakdown, summarizeDebt, mo
 import { normalizeStartDay, periodKeyOf, periodRange } from "../src/lib/dates";
 import { parseLocalText } from "../src/lib/localParser";
 import { DEFAULT_CATEGORIES, db, newId, eraseAllData } from "../src/lib/db";
-import { buildBackup, validateBackupText, restoreBackup, BackupError } from "../src/lib/backup";
+import { buildBackup, validateBackupText, restoreBackup, BackupError, encryptedBackupBlob } from "../src/lib/backup";
+import { DecryptError, decryptText, encryptText, isEncryptedBackupText } from "../src/lib/cryptoBackup";
 import { transactionsToCsv, parseTransactionsCsv } from "../src/lib/csv";
 import { ExtractResponseSchema } from "../src/lib/aiSchema";
 import { localAnswer } from "../src/lib/insights";
@@ -405,6 +406,33 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     await eraseAllData();
     assert.equal(await db.accounts.count(), 0);
     assert.equal(await db.transfers.count(), 0);
+  });
+
+  console.log("এনক্রিপ্টেড ব্যাকআপ");
+  await ok("এনক্রিপ্ট/ডিক্রিপ্ট; ভুল পাসওয়ার্ড ও বদলানো ফাইল প্রত্যাখ্যাত", async () => {
+    const plain = JSON.stringify({ a: "বাংলা ✓", n: 1 });
+    const e = await encryptText(plain, "পাসওয়ার্ড-১২৩");
+    assert.ok(isEncryptedBackupText(e) && !isEncryptedBackupText(plain));
+    assert.ok(!e.includes("বাংলা"));
+    assert.equal(await decryptText(e, "পাসওয়ার্ড-১২৩"), plain);
+    await assert.rejects(decryptText(e, "ভুল-পাসওয়ার্ড"), (x: unknown) => x instanceof DecryptError && x.code === "wrong");
+    const o = JSON.parse(e);
+    const bytes = Buffer.from(o.data, "base64");
+    bytes[3] ^= 1;
+    o.data = bytes.toString("base64");
+    await assert.rejects(decryptText(JSON.stringify(o), "পাসওয়ার্ড-১২৩"), (x: unknown) => x instanceof DecryptError && x.code === "wrong");
+    await assert.rejects(decryptText("{}", "x"), (x: unknown) => x instanceof DecryptError && x.code === "invalid");
+  });
+  await ok("এনক্রিপ্টেড ব্যাকআপ থেকে রিস্টোর; সাধারণ ইম্পোর্ট এটি নেয় না", async () => {
+    await eraseAllData();
+    await db.transactions.add({ ...tx({ amount: 4242 }), id: "enc1", description: "গোপন-বিবরণ" });
+    const text4 = await (await encryptedBackupBlob(await buildBackup(), "secret-pass-1")).text();
+    assert.ok(isEncryptedBackupText(text4));
+    assert.ok(!text4.includes("গোপন-বিবরণ"));
+    await eraseAllData();
+    await restoreBackup(validateBackupText(await decryptText(text4, "secret-pass-1")));
+    assert.equal((await db.transactions.get("enc1"))?.amount, 4242);
+    assert.throws(() => validateBackupText(text4), (e: unknown) => e instanceof BackupError);
   });
 
   console.log(`\nসম্পন্ন: ${n} টি পরীক্ষা চলেছে`, process.exitCode ? "— ব্যর্থতা আছে ✗" : "— সব পাস ✓");

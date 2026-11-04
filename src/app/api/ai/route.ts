@@ -60,7 +60,21 @@ async function callModel(messages: { role: string; content: string }[], json: bo
   return content;
 }
 
+/** অন্য ওয়েবসাইটের ব্রাউজার থেকে আসা অনুরোধ (আপনার key ভাড়া খাটানো) আটকায় */
+function isSameSite(req: Request): boolean {
+  const site = req.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return false;
+  const origin = req.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === req.headers.get("host");
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req: Request) {
+  if (!isSameSite(req)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
   if (rateLimited(ip)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 

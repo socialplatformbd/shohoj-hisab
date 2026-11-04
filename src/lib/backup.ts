@@ -2,9 +2,11 @@ import { z } from "zod";
 import { DB_SCHEMA_VERSION, DEFAULT_CATEGORIES, db } from "./db";
 import { isValidIsoDate, TIMEZONE } from "./dates";
 import { MAX_PAISA } from "./money";
+import { encryptText } from "./cryptoBackup";
 import { PAYMENT_METHODS } from "./types";
 
 export const BACKUP_FILENAME = "shohoj-hisab-backup.json";
+export const ENCRYPTED_BACKUP_FILENAME = "shohoj-hisab-backup-encrypted.json";
 export const BACKUP_FORMAT_VERSION = 1;
 export const BACKUP_MAX_BYTES = 50 * 1024 * 1024;
 
@@ -318,6 +320,11 @@ export async function shareBlob(blob: Blob, filename: string, mime: string): Pro
 
 export function backupBlob(backup: BackupFile): Blob {
   return new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+}
+
+/** পাসওয়ার্ড দিয়ে এনক্রিপ্ট করা ব্যাকআপ ফাইল */
+export async function encryptedBackupBlob(backup: BackupFile, password: string): Promise<Blob> {
+  return new Blob([await encryptText(JSON.stringify(backup), password)], { type: "application/json" });
 }
 
 export { DB_SCHEMA_VERSION };

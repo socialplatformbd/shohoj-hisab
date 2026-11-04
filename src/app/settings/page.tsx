@@ -3,14 +3,17 @@
 import { Download, ExternalLink, FileUp, MessageCircle, Send, Share2, Trash2, Upload } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { useApp } from "@/components/AppProvider";
+import { DecryptSheet } from "@/components/DecryptSheet";
 import { PinSection } from "@/components/PinSection";
 import { Field, PageHeader } from "@/components/ui";
 import {
   BACKUP_FILENAME,
   BackupError,
+  ENCRYPTED_BACKUP_FILENAME,
   backupBlob,
   buildBackup,
   canShareFiles,
+  encryptedBackupBlob,
   readFileText,
   restoreBackup,
   saveBlob,
@@ -19,6 +22,7 @@ import {
   type SaveResult,
 } from "@/lib/backup";
 import { parseTransactionsCsv, transactionsToCsv } from "@/lib/csv";
+import { MIN_PASSWORD_LENGTH, isEncryptedBackupText } from "@/lib/cryptoBackup";
 import { dhakaDateOf, periodKeyOf, periodRange, todayDhaka } from "@/lib/dates";
 import { db, eraseAllData, newId, setSetting } from "@/lib/db";
 import { COMMUNITY_LINKS, APP_VERSION } from "@/lib/links";
@@ -39,6 +43,8 @@ export default function SettingsPage() {
   const { t, settings, updateSetting, data, toast, confirm, lang, digits, date, num, installEvent, installed, promptInstall, dataReady } = useApp();
   const [name, setName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [backupPw, setBackupPw] = useState("");
+  const [pendingEnc, setPendingEnc] = useState<string | null>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
   const csvRef = useRef<HTMLInputElement>(null);
   const [catName, setCatName] = useState("");
@@ -73,14 +79,19 @@ export default function SettingsPage() {
   /* ---------- ব্যাকআপ ---------- */
   async function doBackup(mode: "file" | "share") {
     if (busy) return;
+    if (backupPw && backupPw.length < MIN_PASSWORD_LENGTH) {
+      toast(t("backupPasswordShort"), "error");
+      return;
+    }
     setBusy(true);
     try {
       const backup = await buildBackup();
-      const blob = backupBlob(backup);
+      const blob = backupPw ? await encryptedBackupBlob(backup, backupPw) : backupBlob(backup);
+      const filename = backupPw ? ENCRYPTED_BACKUP_FILENAME : BACKUP_FILENAME;
       if (blob.size === 0) throw new Error("empty");
       let result: SaveResult;
-      if (mode === "share") result = await shareBlob(blob, BACKUP_FILENAME, "application/json");
-      else result = await saveBlob(blob, BACKUP_FILENAME, "application/json", "JSON", ".json");
+      if (mode === "share") result = await shareBlob(blob, filename, "application/json");
+      else result = await saveBlob(blob, filename, "application/json", "JSON", ".json");
       if (result === "cancelled") {
         toast(t("backupCancelled"), "info");
       } else {
@@ -97,13 +108,25 @@ export default function SettingsPage() {
   async function onRestoreFile(file: File | undefined) {
     if (!file) return;
     if (restoreRef.current) restoreRef.current.value = "";
-    setBusy(true);
+    if (file.size > 50 * 1024 * 1024) {
+      toast(t("restoreTooBig"), "error");
+      return;
+    }
     try {
-      if (file.size > 50 * 1024 * 1024) {
-        toast(t("restoreTooBig"), "error");
+      const text = await readFileText(file);
+      if (isEncryptedBackupText(text)) {
+        setPendingEnc(text); // আগে পাসওয়ার্ড চাওয়া হবে
         return;
       }
-      const text = await readFileText(file);
+      await restoreFromText(text);
+    } catch {
+      toast(t("restoreFailed"), "error");
+    }
+  }
+
+  async function restoreFromText(text: string) {
+    setBusy(true);
+    try {
       const parsed = validateBackupText(text);
       const d = parsed.data;
       const when = isNaN(Date.parse(parsed.exportedAt)) ? "—" : fmtTs(Date.parse(parsed.exportedAt));
@@ -330,6 +353,10 @@ export default function SettingsPage() {
       <Section title={t("secBackup")}>
         <p className="text-sm text-muted">{t("backupHint")}</p>
         <p className="text-xs font-medium">{settings.lastBackupAt ? t("lastBackup", { d: fmtTs(settings.lastBackupAt) }) : t("neverBackedUp")}</p>
+        <Field label={t("backupPasswordLabel")} optional>
+          <input className="input" type="password" autoComplete="new-password" value={backupPw} onChange={(e) => setBackupPw(e.target.value)} />
+        </Field>
+        <p className="-mt-2 text-xs text-muted">{t("backupPasswordHint")}</p>
         <button className="btn btn-primary w-full" onClick={() => doBackup("file")} disabled={busy}>
           <Download className="h-5 w-5" />
           {t("backupCreate")}
@@ -345,6 +372,16 @@ export default function SettingsPage() {
           {t("backupRestore")}
         </button>
         <input ref={restoreRef} type="file" accept=".json,application/json,text/plain" className="hidden" onChange={(e) => onRestoreFile(e.target.files?.[0])} data-testid="restore-input" />
+        {pendingEnc !== null && (
+          <DecryptSheet
+            text={pendingEnc}
+            onClose={() => setPendingEnc(null)}
+            onDone={(plain) => {
+              setPendingEnc(null);
+              void restoreFromText(plain);
+            }}
+          />
+        )}
       </Section>
 
       <Section title={t("secExport")}>

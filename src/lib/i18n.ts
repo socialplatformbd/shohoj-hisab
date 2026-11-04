@@ -360,6 +360,16 @@ export const D = {
   recurringDeleteConfirm: ["এই নিয়মটি মুছবেন? আগে যোগ হওয়া লেনদেন থেকে যাবে।", "Delete this rule? Transactions already added will stay."],
   recurringAutoAdded: ["{n}টি নিয়মিত লেনদেন যোগ হয়েছে", "{n} recurring transaction(s) added"],
   errDayInvalid: ["১ থেকে ৩১-এর মধ্যে তারিখ দিন", "Enter a day between 1 and 31"],
+  // এনক্রিপ্টেড ব্যাকআপ
+  backupPasswordLabel: ["ব্যাকআপ পাসওয়ার্ড", "Backup password"],
+  backupPasswordHint: ["দিলে ব্যাকআপ ফাইল এনক্রিপ্ট হবে (AES-256)। পাসওয়ার্ড ভুলে গেলে ফাইল খোলা যাবে না এবং কেউ উদ্ধার করতে পারবে না।", "If set, the backup file is encrypted (AES-256). If you forget the password the file cannot be opened by anyone."],
+  backupPasswordShort: ["পাসওয়ার্ড কমপক্ষে ৮ অক্ষরের হতে হবে", "Password must be at least 8 characters"],
+  encDecryptTitle: ["এনক্রিপ্টেড ব্যাকআপ", "Encrypted backup"],
+  encDecryptHint: ["এই ফাইলটি পাসওয়ার্ড দিয়ে সুরক্ষিত। ব্যাকআপ নেওয়ার সময় দেওয়া পাসওয়ার্ডটি লিখুন।", "This file is password-protected. Enter the password you used when creating it."],
+  encPassword: ["পাসওয়ার্ড", "Password"],
+  encOpen: ["খুলুন", "Open"],
+  encWrongPassword: ["ভুল পাসওয়ার্ড, অথবা ফাইলটি নষ্ট হয়েছে", "Wrong password, or the file is damaged"],
+  encUnsupported: ["এই ফাইলের এনক্রিপশন সংস্করণ এই অ্যাপ সমর্থন করে না", "This file's encryption version is not supported"],
   // অ্যাকাউন্ট ও ট্রান্সফার
   navAccounts: ["অ্যাকাউন্ট", "Accounts"],
   accountsHint: ["নগদ, বিকাশ, ব্যাংক — আলাদা ব্যালেন্স দেখুন এবং এক অ্যাকাউন্ট থেকে অন্যটিতে টাকা সরান।", "See separate balances for cash, bKash, bank and move money between them."],
