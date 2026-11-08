@@ -1,8 +1,8 @@
 import Dexie, { type Table } from "dexie";
-import type { Account, Budget, Category, Debt, MessEntry, MessMeal, MessMember, Recurring, Repayment, SettingRow, Transaction, Transfer } from "./types";
+import type { Account, Budget, Category, Debt, MessEntry, MessMeal, MessMember, Recurring, Repayment, SettingRow, ShopEntry, ShopParty, Transaction, Transfer } from "./types";
 
 export const DB_NAME = "shohoj-hisab";
-export const DB_SCHEMA_VERSION = 4;
+export const DB_SCHEMA_VERSION = 5;
 
 export const DEFAULT_CATEGORIES: Category[] = (
   [
@@ -46,6 +46,8 @@ class HisabDB extends Dexie {
   messMembers!: Table<MessMember, string>;
   messMeals!: Table<MessMeal, string>;
   messEntries!: Table<MessEntry, string>;
+  shopParties!: Table<ShopParty, string>;
+  shopEntries!: Table<ShopEntry, string>;
 
   constructor() {
     super(DB_NAME);
@@ -64,7 +66,10 @@ class HisabDB extends Dexie {
     const v3 = { ...base, recurring: "id", accounts: "id", transfers: "id, date" };
     this.version(3).stores(v3);
     // v4: মেস মোড
-    this.version(DB_SCHEMA_VERSION).stores({ ...v3, messMembers: "id", messMeals: "id, date, memberId", messEntries: "id, date, kind" });
+    const v4 = { ...v3, messMembers: "id", messMeals: "id, date, memberId", messEntries: "id, date, kind" };
+    this.version(4).stores(v4);
+    // v5: দোকান মোড
+    this.version(DB_SCHEMA_VERSION).stores({ ...v4, shopParties: "id, kind", shopEntries: "id, date, kind, partyId" });
     this.on("populate", (tx) => {
       tx.table("categories").bulkAdd(DEFAULT_CATEGORIES);
     });
@@ -89,8 +94,8 @@ export async function setSetting(key: string, value: SettingRow["value"]): Promi
 
 /** সব ডেটা মুছে ডিফল্ট খাত আবার বসায় (ওয়েলকাম-স্ক্রিনের অবস্থা অক্ষত থাকে) */
 export async function eraseAllData(): Promise<void> {
-  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.settings], async () => {
-    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear(), db.messMembers.clear(), db.messMeals.clear(), db.messEntries.clear()]);
+  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.shopParties, db.shopEntries, db.settings], async () => {
+    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear(), db.messMembers.clear(), db.messMeals.clear(), db.messEntries.clear(), db.shopParties.clear(), db.shopEntries.clear()]);
     await db.categories.bulkAdd(DEFAULT_CATEGORIES);
     await db.settings.delete("lastBackupAt");
   });

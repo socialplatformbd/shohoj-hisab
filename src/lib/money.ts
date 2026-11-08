@@ -80,3 +80,11 @@ export function percentOf(part: number, total: number): number {
   if (total <= 0) return part > 0 ? 100 : 0;
   return Math.floor((part * 100) / total);
 }
+
+/** ০ চলে এমন অঙ্ক: খালি বা ০ হলে ০; সঠিক হলে পয়সা; অবৈধ হলে null */
+export function parseAmountOrZero(text: string): number | null {
+  const s = toAsciiDigits(text).replace(/[৳,\s]/g, "");
+  if (s === "") return 0;
+  if (/^0+(\.0{1,2})?$/.test(s)) return 0;
+  return parseAmountToPaisa(s);
+}

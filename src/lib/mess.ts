@@ -59,7 +59,10 @@ export function messSummary(members: MessMember[], meals: MessMeal[], entries: M
   const halvesBy = new Map<string, number>();
   for (const m of meals) if (inMonth(m.date, month)) halvesBy.set(m.memberId, (halvesBy.get(m.memberId) ?? 0) + m.halves);
   const involved = new Set<string>(halvesBy.keys());
-  for (const e of es) if (e.memberId) involved.add(e.memberId);
+  for (const e of es) {
+    if (e.memberId) involved.add(e.memberId);
+    if (e.kind === "shared") e.splitWith?.forEach((id) => involved.add(id));
+  }
   const people = members.filter((m) => m.active || involved.has(m.id));
 
   const totalBazaar = es.filter((e) => e.kind === "bazaar").reduce((s, e) => s + e.amount, 0);
@@ -69,7 +72,13 @@ export function messSummary(members: MessMember[], meals: MessMeal[], entries: M
   const halves = people.map((p) => halvesBy.get(p.id) ?? 0);
   const totalHalves = halves.reduce((s, h) => s + h, 0);
   const mealCosts = allocate(totalBazaar, halves);
-  const sharedShares = allocate(totalShared, people.map(() => 1));
+  // প্রতিটি সাধারণ খরচ আলাদাভাবে ভাগ হয় — নির্দিষ্ট সদস্য বাছা থাকলে শুধু তাদের মধ্যে, নইলে সবার মধ্যে সমান
+  const sharedShares = people.map(() => 0);
+  for (const e of es) {
+    if (e.kind !== "shared") continue;
+    const chosen = e.splitWith && people.some((p) => e.splitWith!.includes(p.id)) ? new Set(e.splitWith) : null;
+    allocate(e.amount, people.map((p) => (chosen ? (chosen.has(p.id) ? 1 : 0) : 1))).forEach((v, i) => (sharedShares[i] += v));
+  }
 
   const rows: MessRow[] = people.map((member, i) => {
     const deposits = es.filter((e) => e.kind === "deposit" && e.memberId === member.id).reduce((s, e) => s + e.amount, 0);

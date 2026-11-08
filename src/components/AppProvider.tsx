@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { BN_MONTHS, BN_MONTHS_SHORT, BN_WEEKDAYS, EN_MONTHS, EN_MONTHS_SHORT, EN_WEEKDAYS, normalizeStartDay, weekdayIndex } from "@/lib/dates";
 import { db, setSetting } from "@/lib/db";
 import type { DataBundle } from "@/lib/insights";
-import type { Account, AppMode, MessEntry, MessMeal, MessMember, Transfer } from "@/lib/types";
+import type { Account, AppMode, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty, Transfer } from "@/lib/types";
 import { translate, type TKey } from "@/lib/i18n";
 import { applyDigits, formatMoney } from "@/lib/money";
 import type { Category, Digits, Lang, SettingRow, Theme } from "@/lib/types";
@@ -23,7 +23,7 @@ export interface Settings {
   lastBackupAt: number | null;
   /** মাস কোন তারিখ থেকে শুরু (১ = সাধারণ ক্যালেন্ডার মাস; বেতনের তারিখ হলে ২–২৮) */
   monthStartDay: number;
-  /** চলতি মোড: ব্যক্তিগত (ডিফল্ট) বা মেস */
+  /** চলতি মোড: ব্যক্তিগত (ডিফল্ট), মেস বা দোকান */
   mode: AppMode;
 }
 
@@ -68,8 +68,8 @@ export function useApp(): AppCtx {
 }
 
 /** অ্যাপের সব ডেটা (AI-র DataBundle + অ্যাকাউন্ট ও ট্রান্সফার) */
-export type AppData = DataBundle & { accounts: Account[]; transfers: Transfer[]; messMembers: MessMember[]; messMeals: MessMeal[]; messEntries: MessEntry[] };
-const EMPTY: AppData = { transactions: [], categories: [], budgets: [], debts: [], repayments: [], accounts: [], transfers: [], messMembers: [], messMeals: [], messEntries: [] };
+export type AppData = DataBundle & { accounts: Account[]; transfers: Transfer[]; messMembers: MessMember[]; messMeals: MessMeal[]; messEntries: MessEntry[]; shopParties: ShopParty[]; shopEntries: ShopEntry[] };
+const EMPTY: AppData = { transactions: [], categories: [], budgets: [], debts: [], repayments: [], accounts: [], transfers: [], messMembers: [], messMeals: [], messEntries: [], shopParties: [], shopEntries: [] };
 
 const TOAST_ICON = { success: CheckCircle2, error: XCircle, warn: AlertTriangle, info: Info };
 const TOAST_STYLE: Record<ToastKind, string> = {
@@ -91,7 +91,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dbError, setDbError] = useState(false);
   const settingRows = useLiveQuery(() => db.settings.toArray(), []);
   const data = useLiveQuery(async () => {
-    const [transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries] = await Promise.all([
+    const [transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries] = await Promise.all([
       db.transactions.toArray(),
       db.categories.toArray(),
       db.budgets.toArray(),
@@ -102,8 +102,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       db.messMembers.toArray(),
       db.messMeals.toArray(),
       db.messEntries.toArray(),
+      db.shopParties.toArray(),
+      db.shopEntries.toArray(),
     ]);
-    return { transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries } satisfies AppData;
+    return { transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries } satisfies AppData;
   }, []);
 
   useEffect(() => {
@@ -123,7 +125,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       budgetNotifications: m.get("budgetNotifications") === true,
       lastBackupAt: typeof m.get("lastBackupAt") === "number" ? (m.get("lastBackupAt") as number) : null,
       monthStartDay: normalizeStartDay(m.get("monthStartDay")),
-      mode: m.get("mode") === "mess" ? "mess" : "personal",
+      mode: m.get("mode") === "mess" ? "mess" : m.get("mode") === "shop" ? "shop" : "personal",
     };
   }, [settingRows]);
 

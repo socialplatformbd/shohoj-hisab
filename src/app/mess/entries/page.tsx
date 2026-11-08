@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2, Banknote } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
+import { LabelChips, savedLabels } from "@/components/LabelChips";
 import { EmptyState, Field, PageHeader, Sheet } from "@/components/ui";
 import { addMonths, isValidIsoDate, monthKey, todayDhaka } from "@/lib/dates";
 import { db, newId } from "@/lib/db";
@@ -126,8 +127,17 @@ function EntrySheet({ entry, defaultKind, onClose }: { entry?: MessEntry; defaul
   const [amountText, setAmountText] = useState(entry ? formatPlainPaisa(entry.amount, "en").replace(/,/g, "").replace(/\.00$/, "") : "");
   const [dateText, setDateText] = useState(entry?.date ?? todayDhaka());
   const [note, setNote] = useState(entry?.note ?? "");
-  const [errors, setErrors] = useState<{ member?: string; amount?: string; date?: string; note?: string }>({});
+  const [errors, setErrors] = useState<{ member?: string; amount?: string; date?: string; note?: string; split?: string }>({});
   const [busy, setBusy] = useState(false);
+
+  // সাধারণ খরচ: কাদের মধ্যে ভাগ হবে (শুরুতে সবাই) ও খাতের নামের দ্রুত বাছাই
+  const activeIds = data.messMembers.filter((m) => m.active).map((m) => m.id);
+  const [splitIds, setSplitIds] = useState<string[]>(() => entry?.splitWith ?? activeIds);
+  const presets = [t("labelRent"), t("labelElectricity"), t("labelGas"), t("labelInternet"), t("labelWater"), t("labelHelper")];
+  const saved = savedLabels(
+    data.messEntries.filter((e) => e.kind === "shared").map((e) => ({ label: e.note, at: e.createdAt })),
+    presets,
+  );
 
   // সক্রিয় সদস্য + (সম্পাদনার সময়) এই এন্ট্রির সদস্য, নিষ্ক্রিয় হলেও
   const people = data.messMembers.filter((m) => m.active || m.id === entry?.memberId);
@@ -141,12 +151,24 @@ function EntrySheet({ entry, defaultKind, onClose }: { entry?: MessEntry; defaul
     else if (amount === null) err.amount = t("errAmountInvalid");
     if (!isValidIsoDate(dateText) || dateText < "2000-01-01" || dateText > "2100-12-31") err.date = t("errDateInvalid");
     if (note.length > 200) err.note = t("errTooLong");
+    if (kind === "shared" && splitIds.length === 0) err.split = t("errSplitNone");
     setErrors(err);
     if (Object.keys(err).length || amount === null) return;
     setBusy(true);
     try {
       const payer = people.some((m) => m.id === memberId) ? memberId : undefined;
-      const row: MessEntry = { id: entry?.id ?? newId(), kind, memberId: payer, amount, date: dateText, note: note.trim() || undefined, createdAt: entry?.createdAt ?? Date.now() };
+      // সবাই (সব সক্রিয় সদস্য) বাছা থাকলে splitWith রাখা হয় না — পরে নতুন সদস্য এলে সেও ভাগ পাবে
+      const everyone = activeIds.length > 0 && activeIds.every((id) => splitIds.includes(id)) && splitIds.every((id) => activeIds.includes(id));
+      const row: MessEntry = {
+        id: entry?.id ?? newId(),
+        kind,
+        memberId: payer,
+        amount,
+        date: dateText,
+        note: note.trim() || undefined,
+        splitWith: kind === "shared" && !everyone ? splitIds : undefined,
+        createdAt: entry?.createdAt ?? Date.now(),
+      };
       await db.messEntries.put(row);
       toast(t("messEntrySaved"));
       onClose();
@@ -192,9 +214,39 @@ function EntrySheet({ entry, defaultKind, onClose }: { entry?: MessEntry; defaul
         <Field label={t("date")} error={errors.date}>
           <input className="input" type="date" value={dateText} onChange={(e) => setDateText(e.target.value)} />
         </Field>
-        <Field label={t("messEntryNote")} optional error={errors.note}>
+        <Field label={kind === "shared" ? t("messSharedTitle") : t("messEntryNote")} optional error={errors.note}>
           <input className="input" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
+        {kind === "shared" && (
+          <>
+            <div className="-mt-2">
+              <LabelChips presets={presets} saved={saved} onPick={setNote} />
+            </div>
+            <fieldset>
+              <legend className="mb-1 text-sm font-semibold">{t("messSplitWith")}</legend>
+              <div className="space-y-1">
+                {data.messMembers
+                  .filter((m) => m.active || splitIds.includes(m.id))
+                  .map((m) => (
+                    <label key={m.id} className="flex min-h-11 items-center gap-3">
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5"
+                        checked={splitIds.includes(m.id)}
+                        onChange={(e) => setSplitIds(e.target.checked ? [...splitIds, m.id] : splitIds.filter((x) => x !== m.id))}
+                      />
+                      <span>{m.name}</span>
+                    </label>
+                  ))}
+              </div>
+              {errors.split && (
+                <p className="mt-1 text-sm font-medium text-rose-600" role="alert">
+                  {errors.split}
+                </p>
+              )}
+            </fieldset>
+          </>
+        )}
         <button type="submit" className="btn btn-primary w-full" disabled={busy}>
           {t("save")}
         </button>

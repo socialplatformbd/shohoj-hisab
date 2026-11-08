@@ -16,7 +16,9 @@ import { dueOccurrences, defaultStartMonth, generateRecurring, occurrenceId, sch
 import { PIN_RE, hashPin, makeSalt, normalizePin, verifyPin } from "../src/lib/pin";
 import { accountSummary } from "../src/lib/accounts";
 import { allocate, messSummary, mealId } from "../src/lib/mess";
-import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember } from "../src/lib/types";
+import { paidOf, creditOf, partyBalances, shopSummary, shopEntryValid } from "../src/lib/shop";
+import { parseAmountOrZero } from "../src/lib/money";
+import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty } from "../src/lib/types";
 
 let n = 0;
 const ok = (name: string, fn: () => void | Promise<void>) =>
@@ -478,6 +480,82 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     delete old.data.messMeals;
     delete old.data.messEntries;
     assert.deepEqual(validateBackupText(JSON.stringify(old)).data.messMembers, []);
+    await eraseAllData();
+  });
+
+  await ok("মেস: সাধারণ খরচ নির্দিষ্ট সদস্যদের মধ্যে ভাগ (splitWith)", () => {
+    const mem = (id: string): MessMember => ({ id, name: id, active: true, createdAt: 1, updatedAt: 1 });
+    const meals: MessMeal[] = ["a", "b", "c"].map((m) => ({ id: mealId("2026-11-01", m), date: "2026-11-01", memberId: m, halves: 2, updatedAt: 1 }));
+    const sh = (o: Partial<MessEntry>): MessEntry => ({ id: newId(), kind: "shared", amount: 100, date: "2026-11-03", createdAt: 1, ...o });
+    const sm = messSummary([mem("a"), mem("b"), mem("c")], meals, [sh({ amount: 90000 }), sh({ amount: 10001, splitWith: ["a", "b"] })], "2026-11");
+    const by = Object.fromEntries(sm.rows.map((r) => [r.member.id, r.shared]));
+    assert.equal(by.a + by.b + by.c, 100001);
+    assert.equal(by.c, 30000);
+    const fb = messSummary([mem("a"), mem("b")], [], [sh({ amount: 300, splitWith: ["zzz"] })], "2026-11");
+    assert.deepEqual(fb.rows.map((r) => r.shared), [150, 150]);
+  });
+
+  console.log("দোকান মোড");
+  await ok("দোকানের হিসাব: বিক্রি/ক্রয়/খরচ/লাভ, ক্যাশ, বাকি", () => {
+    const P = (id: string, kind: "customer" | "supplier"): ShopParty => ({ id, name: id, kind, createdAt: 1, updatedAt: 1 });
+    const E = (o: Partial<ShopEntry>): ShopEntry => ({ id: newId(), kind: "sale", amount: 1000, date: "2026-11-03", createdAt: 1, ...o });
+    const parties = [P("c1", "customer"), P("c2", "customer"), P("s1", "supplier")];
+    const entries = [
+      E({ kind: "sale", amount: 5000 }),
+      E({ kind: "sale", amount: 3000, paidAmount: 1000, partyId: "c1" }),
+      E({ kind: "sale", amount: 2000, paidAmount: 0, partyId: "c2" }),
+      E({ kind: "receive", amount: 500, partyId: "c1" }),
+      E({ kind: "purchase", amount: 4000, paidAmount: 1500, partyId: "s1" }),
+      E({ kind: "pay", amount: 1000, partyId: "s1" }),
+      E({ kind: "expense", amount: 700, category: "ভাড়া" }),
+      E({ kind: "sale", amount: 900, date: "2026-10-31" }),
+    ];
+    assert.equal(paidOf(entries[1]), 1000);
+    assert.equal(creditOf(entries[1]), 2000);
+    const bal = Object.fromEntries(partyBalances(parties, entries).map((b) => [b.party.id, b.balance]));
+    assert.deepEqual([bal.c1, bal.c2, bal.s1], [1500, 2000, 1500]);
+    const m = shopSummary(entries, parties, "2026-11-01", "2026-11-30");
+    assert.equal(m.sales, 10000);
+    assert.equal(m.profit, 10000 - 4000 - 700);
+    assert.equal(m.cash, 5000 + 1000 + 500 - 1500 - 1000 - 700 + 900);
+    assert.equal(m.customerDue, 3500);
+    assert.equal(m.supplierDue, 1500);
+    const pm = new Map(parties.map((p) => [p.id, p]));
+    assert.ok(shopEntryValid(entries[1], pm));
+    assert.ok(!shopEntryValid(E({ kind: "sale", amount: 100, paidAmount: 0 }), pm));
+    assert.ok(!shopEntryValid(E({ kind: "receive", amount: 100, partyId: "s1" }), pm));
+    assert.ok(!shopEntryValid(E({ kind: "sale", amount: 100, paidAmount: 200, partyId: "c1" }), pm));
+    assert.equal(parseAmountOrZero(""), 0);
+    assert.equal(parseAmountOrZero("০"), 0);
+    assert.equal(parseAmountOrZero("abc"), null);
+  });
+  await ok("দোকানের ডেটা ব্যাকআপে যায়-ফেরে; অবৈধ এন্ট্রি প্রত্যাখ্যাত; পুরনো ব্যাকআপ চলে", async () => {
+    await eraseAllData();
+    const now = Date.now();
+    await db.shopParties.bulkAdd([
+      { id: "p1", name: "রহিম", kind: "customer", phone: "01700000000", createdAt: now, updatedAt: now },
+      { id: "p2", name: "সরবরাহকারী", kind: "supplier", createdAt: now, updatedAt: now },
+    ]);
+    await db.shopEntries.bulkAdd([
+      { id: "se1", kind: "sale", amount: 300000, paidAmount: 100000, partyId: "p1", date: "2026-11-02", createdAt: now },
+      { id: "se2", kind: "expense", amount: 50000, category: "দোকান ভাড়া", date: "2026-11-02", createdAt: now },
+    ]);
+    const text6 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    assert.equal(await db.shopEntries.count(), 0);
+    await restoreBackup(validateBackupText(text6));
+    assert.equal(await db.shopParties.count(), 2);
+    assert.equal(await db.shopEntries.count(), 2);
+    const bad = JSON.parse(text6);
+    bad.data.shopEntries[0].partyId = "p2"; // বিক্রিতে সরবরাহকারী — ভুল ধরন
+    assert.throws(() => validateBackupText(JSON.stringify(bad)), (e: unknown) => e instanceof BackupError);
+    const bad2 = JSON.parse(text6);
+    bad2.data.shopEntries[0].paidAmount = 999999999; // মোটের বেশি নগদ
+    assert.throws(() => validateBackupText(JSON.stringify(bad2)), (e: unknown) => e instanceof BackupError);
+    const old = JSON.parse(text6);
+    delete old.data.shopParties;
+    delete old.data.shopEntries;
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.shopEntries, []);
     await eraseAllData();
   });
 

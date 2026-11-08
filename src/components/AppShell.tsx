@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, BarChart3, Bot, CalendarDays, Home, ListChecks, MoreHorizontal, Plus, Users, Utensils, WifiOff } from "lucide-react";
+import { Banknote, BarChart3, Bot, CalendarDays, Home, ListChecks, MoreHorizontal, Plus, Receipt, Store, Users, Utensils, WifiOff } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -61,9 +61,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const mode = settings.mode;
   useEffect(() => {
     if (!ready || !welcomeDone) return;
+    // প্রতিটি মোডের নিজের পেজ; "/more" ও "/settings" সব মোডে চলে
+    const shared = pathname === "/more" || pathname === "/settings";
     const inMess = pathname.startsWith("/mess");
-    if (mode === "mess" && !inMess && pathname !== "/more" && pathname !== "/settings") router.replace("/mess");
-    else if (mode === "personal" && inMess) router.replace("/");
+    const inShop = pathname.startsWith("/shop");
+    if (mode === "mess" && !inMess && !shared) router.replace("/mess");
+    else if (mode === "shop" && !inShop && !shared) router.replace("/shop");
+    else if (mode === "personal" && (inMess || inShop)) router.replace("/");
   }, [ready, welcomeDone, mode, pathname, router]);
 
   if (!mounted || (!ready && !dbError)) {
@@ -101,6 +105,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     { href: "/mess/members", label: t("messMembers"), icon: Users, active: pathname.startsWith("/mess/members") },
     { href: "/more", label: t("navMore"), icon: MoreHorizontal, active: pathname === "/more" || pathname.startsWith("/settings") },
   ];
+  const shopNav = [
+    { href: "/shop", label: t("shopHome"), icon: Store, active: pathname === "/shop" },
+    { href: "/shop/entries", label: t("shopBook"), icon: Receipt, active: pathname.startsWith("/shop/entries") },
+    { href: "/shop/parties", label: t("shopParties"), icon: Users, active: pathname.startsWith("/shop/parties") },
+    { href: "/more", label: t("navMore"), icon: MoreHorizontal, active: pathname === "/more" || pathname.startsWith("/settings") },
+  ];
   const personalNav = [
     { href: "/", label: t("navHome"), icon: Home, active: pathname === "/" },
     { href: "/transactions", label: t("navTransactions"), icon: ListChecks, active: pathname.startsWith("/transactions") },
@@ -108,7 +118,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     { href: "/reports", label: t("navReports"), icon: BarChart3, active: pathname.startsWith("/reports") },
     { href: "/more", label: t("navMore"), icon: MoreHorizontal, active: MORE_PATHS.some((p) => pathname.startsWith(p)) },
   ];
-  const nav = mode === "mess" ? messNav : personalNav;
+  const nav = mode === "mess" ? messNav : mode === "shop" ? shopNav : personalNav;
   const showFab = mode === "personal" && (pathname === "/" || pathname.startsWith("/transactions"));
 
   return (
@@ -120,7 +130,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="min-w-0 flex-1 leading-tight">
             <p className="text-lg font-extrabold text-emerald-700 dark:text-emerald-400">
               {t("appName")}
-              {mode === "mess" && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 align-middle text-xs font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">{t("modeMess")}</span>}
+              {mode !== "personal" && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 align-middle text-xs font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">{mode === "mess" ? t("modeMess") : t("modeShop")}</span>}
             </p>
             {settings.userName && (
               <p className="truncate text-xs text-muted">
@@ -150,7 +160,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-card/95 backdrop-blur" aria-label="main">
-        <ul className="mx-auto grid max-w-2xl grid-cols-5 pb-[env(safe-area-inset-bottom)]">
+        <ul className="mx-auto grid max-w-2xl pb-[env(safe-area-inset-bottom)]" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
           {nav.map((n) => (
             <li key={n.href}>
               <Link

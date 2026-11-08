@@ -40,9 +40,38 @@ export interface Transfer {
   createdAt: number;
 }
 
-/** অ্যাপের মোড: ব্যক্তিগত (ডিফল্ট) বা মেস */
-export type AppMode = "personal" | "mess";
-export const APP_MODES: readonly AppMode[] = ["personal", "mess"];
+/** অ্যাপের মোড: ব্যক্তিগত (ডিফল্ট), মেস বা দোকান */
+export type AppMode = "personal" | "mess" | "shop";
+export const APP_MODES: readonly AppMode[] = ["personal", "mess", "shop"];
+
+/** দোকানের কাস্টমার (বাকিতে বিক্রি) বা সরবরাহকারী (বাকিতে ক্রয়) */
+export type ShopPartyKind = "customer" | "supplier";
+export interface ShopParty {
+  id: string;
+  name: string;
+  kind: ShopPartyKind;
+  phone?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * sale = বিক্রি, purchase = মাল ক্রয়, expense = দোকানের খরচ,
+ * receive = কাস্টমারের বাকি আদায়, pay = সরবরাহকারীর দেনা পরিশোধ
+ */
+export type ShopEntryKind = "sale" | "purchase" | "expense" | "receive" | "pay";
+export const SHOP_ENTRY_KINDS: readonly ShopEntryKind[] = ["sale", "purchase", "expense", "receive", "pay"];
+export interface ShopEntry {
+  id: string;
+  kind: ShopEntryKind;
+  amount: number; // বিক্রি/ক্রয়ের মোট; খরচ/আদায়/পরিশোধের অঙ্ক
+  paidAmount?: number; // বিক্রি/ক্রয়ে এখনই যা নেওয়া/দেওয়া হয়েছে; না থাকলে পুরোটাই নগদ
+  partyId?: string; // বাকি/আদায়/পরিশোধে আবশ্যক
+  category?: string; // দোকানের খরচের খাত (নিজের লেখাও চলে)
+  note?: string;
+  date: string;
+  createdAt: number;
+}
 
 /** মেসের সদস্য — ডেটা থাকলে মোছা হয় না, নিষ্ক্রিয় (active=false) করা হয় */
 export interface MessMember {
@@ -71,7 +100,8 @@ export interface MessEntry {
   memberId?: string; // জমা: যিনি দিয়েছেন (আবশ্যক); বাজার/সাধারণ খরচ: যিনি নিজের পকেট থেকে দিয়েছেন (না থাকলে পুলের টাকা থেকে)
   amount: number;
   date: string;
-  note?: string;
+  note?: string; // সাধারণ খরচে এটিই খাতের নাম (ভাড়া, বিদ্যুৎ বা নিজের লেখা)
+  splitWith?: string[]; // সাধারণ খরচ কাদের মধ্যে ভাগ হবে; না থাকলে সব অংশগ্রহণকারী
   createdAt: number;
 }
 

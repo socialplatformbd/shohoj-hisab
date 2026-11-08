@@ -3,6 +3,7 @@ import { DB_SCHEMA_VERSION, DEFAULT_CATEGORIES, db } from "./db";
 import { isValidIsoDate, TIMEZONE } from "./dates";
 import { MAX_PAISA } from "./money";
 import { encryptText } from "./cryptoBackup";
+import { shopEntryValid } from "./shop";
 import { PAYMENT_METHODS } from "./types";
 
 export const BACKUP_FILENAME = "shohoj-hisab-backup.json";
@@ -123,6 +124,26 @@ export const MessEntrySchema = z.object({
   amount: paisa,
   date,
   note: z.string().max(500).optional(),
+  splitWith: z.array(id).max(200).optional(),
+  createdAt: ts,
+});
+export const ShopPartySchema = z.object({
+  id,
+  name: z.string().min(1).max(60),
+  kind: z.enum(["customer", "supplier"]),
+  phone: z.string().max(20).optional(),
+  createdAt: ts,
+  updatedAt: ts,
+});
+export const ShopEntrySchema = z.object({
+  id,
+  kind: z.enum(["sale", "purchase", "expense", "receive", "pay"]),
+  amount: paisa,
+  paidAmount: z.number().int().min(0).max(MAX_PAISA).optional(),
+  partyId: id.optional(),
+  category: z.string().max(60).optional(),
+  note: z.string().max(500).optional(),
+  date,
   createdAt: ts,
 });
 export const SettingSchema = z.object({
@@ -147,6 +168,8 @@ export const BackupSchema = z.object({
     messMembers: z.array(MessMemberSchema).default([]),
     messMeals: z.array(MessMealSchema).default([]),
     messEntries: z.array(MessEntrySchema).default([]),
+    shopParties: z.array(ShopPartySchema).default([]),
+    shopEntries: z.array(ShopEntrySchema).default([]),
     settings: z.array(SettingSchema),
   }),
 });
@@ -157,8 +180,8 @@ export type BackupFile = z.infer<typeof BackupSchema>;
 const PREFERENCE_KEYS = ["userName", "language", "digits", "theme", "budgetNotifications", "monthStartDay", "mode"];
 
 export async function buildBackup(): Promise<BackupFile> {
-  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.settings], async () => {
-    const [transactions, categories, budgets, debts, repayments, recurring, accounts, transfers, messMembers, messMeals, messEntries, settings] = await Promise.all([
+  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.shopParties, db.shopEntries, db.settings], async () => {
+    const [transactions, categories, budgets, debts, repayments, recurring, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, settings] = await Promise.all([
       db.transactions.toArray(),
       db.categories.toArray(),
       db.budgets.toArray(),
@@ -170,6 +193,8 @@ export async function buildBackup(): Promise<BackupFile> {
       db.messMembers.toArray(),
       db.messMeals.toArray(),
       db.messEntries.toArray(),
+      db.shopParties.toArray(),
+      db.shopEntries.toArray(),
       db.settings.toArray(),
     ]);
     return {
@@ -189,6 +214,8 @@ export async function buildBackup(): Promise<BackupFile> {
         messMembers,
         messMeals,
         messEntries,
+        shopParties,
+        shopEntries,
         settings: settings.filter((s) => PREFERENCE_KEYS.includes(s.key)),
       },
     };
@@ -235,7 +262,9 @@ export function validateBackupText(text: string): BackupFile {
     dupes(data.transfers.map((x) => x.id)) ||
     dupes(data.messMembers.map((x) => x.id)) ||
     dupes(data.messMeals.map((x) => x.id)) ||
-    dupes(data.messEntries.map((x) => x.id))
+    dupes(data.messEntries.map((x) => x.id)) ||
+    dupes(data.shopParties.map((x) => x.id)) ||
+    dupes(data.shopEntries.map((x) => x.id))
   ) {
     throw new BackupError("invalid");
   }
@@ -246,7 +275,9 @@ export function validateBackupText(text: string): BackupFile {
   if (data.recurring.some((r) => !catIds.has(r.categoryId))) throw new BackupError("invalid");
   const memberIds = new Set(data.messMembers.map((m) => m.id));
   if (data.messMeals.some((m) => !memberIds.has(m.memberId))) throw new BackupError("invalid");
-  if (data.messEntries.some((e) => (e.memberId !== undefined && !memberIds.has(e.memberId)) || (e.kind === "deposit" && e.memberId === undefined))) throw new BackupError("invalid");
+  if (data.messEntries.some((e) => (e.memberId !== undefined && !memberIds.has(e.memberId)) || (e.kind === "deposit" && e.memberId === undefined) || (e.splitWith ?? []).some((x) => !memberIds.has(x)))) throw new BackupError("invalid");
+  const partyMap = new Map(data.shopParties.map((p) => [p.id, p]));
+  if (data.shopEntries.some((e) => !shopEntryValid(e, partyMap))) throw new BackupError("invalid");
   const accIds = new Set(data.accounts.map((a) => a.id));
   if (data.transactions.some((t) => t.accountId !== undefined && !accIds.has(t.accountId))) throw new BackupError("invalid");
   if (data.recurring.some((r) => r.accountId !== undefined && !accIds.has(r.accountId))) throw new BackupError("invalid");
@@ -265,8 +296,8 @@ export function validateBackupText(text: string): BackupFile {
 /** একটি ট্রানজ্যাকশনে সব বদলায় — মাঝপথে ব্যর্থ হলে আগের ডেটা অক্ষত থাকে */
 export async function restoreBackup(file: BackupFile): Promise<void> {
   const d = file.data;
-  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.settings], async () => {
-    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear(), db.messMembers.clear(), db.messMeals.clear(), db.messEntries.clear()]);
+  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.shopParties, db.shopEntries, db.settings], async () => {
+    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear(), db.messMembers.clear(), db.messMeals.clear(), db.messEntries.clear(), db.shopParties.clear(), db.shopEntries.clear()]);
     await db.categories.bulkAdd(d.categories);
     // ডিফল্ট খাত (যেমন "অন্যান্য খরচ") ব্যাকআপে না থাকলেও যেন থাকে — নইলে AI/ফলব্যাক এমন খাতে লেখে যা নেই
     const have = new Set(d.categories.map((c) => c.id));
@@ -282,6 +313,8 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
     await db.messMembers.bulkAdd(d.messMembers);
     await db.messMeals.bulkAdd(d.messMeals);
     await db.messEntries.bulkAdd(d.messEntries);
+    await db.shopParties.bulkAdd(d.shopParties);
+    await db.shopEntries.bulkAdd(d.shopEntries);
     await db.settings.bulkPut(d.settings);
   });
 }

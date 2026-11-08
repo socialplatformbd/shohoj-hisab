@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, HandCoins, PiggyBank, Repeat, Settings, Utensils, Wallet } from "lucide-react";
+import { ChevronRight, HandCoins, PiggyBank, Repeat, Settings, Store, Utensils, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/components/AppProvider";
@@ -15,8 +15,8 @@ export default function MorePage() {
     if (m === settings.mode) return;
     try {
       await updateSetting("mode", m);
-      toast(t("modeSwitched", { m: m === "mess" ? t("modeMess") : t("modePersonal") }));
-      router.push(m === "mess" ? "/mess" : "/");
+      toast(t("modeSwitched", { m: m === "mess" ? t("modeMess") : m === "shop" ? t("modeShop") : t("modePersonal") }));
+      router.push(m === "mess" ? "/mess" : m === "shop" ? "/shop" : "/");
     } catch {
       toast(t("dbError"), "error");
     }
@@ -25,6 +25,7 @@ export default function MorePage() {
   const modes = [
     { id: "personal" as const, label: t("modePersonal"), desc: t("modePersonalDesc"), icon: Wallet },
     { id: "mess" as const, label: t("modeMess"), desc: t("modeMessDesc"), icon: Utensils },
+    { id: "shop" as const, label: t("modeShop"), desc: t("modeShopDesc"), icon: Store },
   ];
   const personalItems = [
     { href: "/budgets", label: t("navBudgets"), icon: PiggyBank, color: "bg-amber-500" },
@@ -33,14 +34,14 @@ export default function MorePage() {
     { href: "/recurring", label: t("navRecurring"), icon: Repeat, color: "bg-violet-600" },
   ];
   const settingsItem = { href: "/settings", label: t("navSettings"), icon: Settings, color: "bg-slate-600" };
-  const items = settings.mode === "mess" ? [settingsItem] : [...personalItems, settingsItem];
+  const items = settings.mode === "personal" ? [...personalItems, settingsItem] : [settingsItem];
   return (
     <div>
       <PageHeader title={t("more")} />
       <section className="mb-5">
         <h2 className="mb-1 text-lg font-bold">{t("modeTitle")}</h2>
         <p className="mb-3 text-sm text-muted">{t("modeHint")}</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3">
           {modes.map((m) => {
             const on = settings.mode === m.id;
             return (
@@ -48,7 +49,7 @@ export default function MorePage() {
                 key={m.id}
                 onClick={() => void switchMode(m.id)}
                 aria-pressed={on}
-                className={`card flex min-h-28 flex-col items-start gap-1 text-left ${on ? "border-emerald-600 ring-2 ring-emerald-600" : ""}`}
+                className={`card flex min-h-20 flex-col items-start gap-1 text-left ${on ? "border-emerald-600 ring-2 ring-emerald-600" : ""}`}
               >
                 <m.icon className="h-6 w-6 text-emerald-700 dark:text-emerald-400" />
                 <span className="text-base font-bold">{m.label}</span>
