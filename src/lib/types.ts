@@ -14,6 +14,9 @@ export interface Transaction {
   description?: string;
   paymentMethod?: string;
   accountId?: string; // কোন অ্যাকাউন্টে (ঐচ্ছিক)
+  reimbursable?: boolean; // অফিস/অন্যের জন্য করা খরচ — ফেরত পাওয়ার কথা
+  reimbursedAt?: string; // ফেরত পাওয়ার তারিখ (পেয়ে গেলে)
+  reimbursementTxId?: string; // ফেরতের আয়-এন্ট্রির আইডি
   note?: string;
   createdAt: number;
   updatedAt: number;

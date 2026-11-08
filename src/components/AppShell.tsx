@@ -13,7 +13,7 @@ import { todayDhaka } from "@/lib/dates";
 import { generateRecurring } from "@/lib/recurring";
 import { Welcome } from "./Welcome";
 
-const MORE_PATHS = ["/more", "/budgets", "/debts", "/accounts", "/recurring", "/settings"];
+const MORE_PATHS = ["/more", "/budgets", "/debts", "/accounts", "/recurring", "/reimbursements", "/settings"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ready, dbError, settings, t, online, toast } = useApp();

@@ -18,6 +18,7 @@ import { accountSummary } from "../src/lib/accounts";
 import { allocate, messSummary, mealId } from "../src/lib/mess";
 import { paidOf, creditOf, partyBalances, shopSummary, shopEntryValid } from "../src/lib/shop";
 import { parseAmountOrZero } from "../src/lib/money";
+import { markReceived, undoReceived, isPending, isReceived, pendingTotal, reimbursementIncomeId, REIMBURSEMENT_CATEGORY_ID } from "../src/lib/reimburse";
 import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty } from "../src/lib/types";
 
 let n = 0;
@@ -556,6 +557,42 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     delete old.data.shopParties;
     delete old.data.shopEntries;
     assert.deepEqual(validateBackupText(JSON.stringify(old)).data.shopEntries, []);
+    await eraseAllData();
+  });
+
+  console.log("অফিস খরচ ফেরত");
+  await ok("ফেরত পাওয়া ও বাতিল; দুইবার চাপলে ডুপ্লিকেট নয়; ব্যালেন্স অপরিবর্তিত", async () => {
+    await eraseAllData();
+    const base = tx({ id: "rx1", amount: 250000, description: "অফিস ট্যুর", reimbursable: true, date: "2026-11-02" });
+    await db.transactions.bulkAdd([base, tx({ id: "rx2", amount: 100, reimbursable: false })]);
+    let all = await db.transactions.toArray();
+    assert.equal(all.filter(isPending).length, 1);
+    assert.equal(pendingTotal(all), 250000);
+    assert.equal(await markReceived("rx1", "2026-11-09", undefined, "ফেরত"), true);
+    const inc = await db.transactions.get(reimbursementIncomeId("rx1"));
+    assert.equal(inc?.type, "income");
+    assert.equal(inc?.amount, 250000);
+    assert.equal(inc?.categoryId, REIMBURSEMENT_CATEGORY_ID);
+    assert.ok(await db.categories.get(REIMBURSEMENT_CATEGORY_ID));
+    all = await db.transactions.toArray();
+    assert.equal(all.filter(isReceived).length, 1);
+    assert.equal(await markReceived("rx1", "2026-11-10", undefined, "ফেরত"), false);
+    assert.equal(all.filter((x) => x.id.startsWith("reimb_")).length, 1);
+    assert.equal(await undoReceived("rx1"), true);
+    assert.equal(await db.transactions.get(reimbursementIncomeId("rx1")), undefined);
+    assert.equal((await db.transactions.get("rx1"))?.reimbursedAt, undefined);
+    assert.equal((await db.transactions.toArray()).filter(isPending).length, 1);
+  });
+  await ok("ব্যাকআপে ফেরতের তথ্য যায়-ফেরে", async () => {
+    await eraseAllData();
+    await db.transactions.add(tx({ id: "rb1", amount: 5000, reimbursable: true }));
+    await markReceived("rb1", "2026-11-09", undefined, "ফেরত");
+    const text7 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    await restoreBackup(validateBackupText(text7));
+    assert.equal((await db.transactions.get("rb1"))?.reimbursedAt, "2026-11-09");
+    assert.ok(await db.transactions.get(reimbursementIncomeId("rb1")));
+    assert.ok(await db.categories.get(REIMBURSEMENT_CATEGORY_ID));
     await eraseAllData();
   });
 

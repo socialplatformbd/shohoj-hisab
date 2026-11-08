@@ -4,6 +4,7 @@ import { ArrowDownLeft, ArrowUpRight, PiggyBank, Wallet } from "lucide-react";
 import { useState } from "react";
 import { dhakaDateOf } from "@/lib/dates";
 import { db } from "@/lib/db";
+import { isPending, isReceived } from "@/lib/reimburse";
 import { PAYMENT_METHODS, type Transaction } from "@/lib/types";
 import { useApp } from "./AppProvider";
 import { useTxForm } from "./TransactionForm";
@@ -28,6 +29,7 @@ export function TransactionRow({ tx, onClick }: { tx: Transaction; onClick: () =
         <span className="block truncate text-xs text-muted">
           {catName(cat)} • {shortDate(tx.date)}
           {tx.paymentMethod ? ` • ${isMethod(tx.paymentMethod) ? t(`pm_${tx.paymentMethod}` as const) : tx.paymentMethod}` : ""}
+          {isPending(tx) ? ` • ${t("reimbPendingTag")}` : isReceived(tx) ? ` • ${t("reimbReceivedTag")}` : ""}
         </span>
       </span>
       <span className={`shrink-0 font-bold ${st.text}`}>

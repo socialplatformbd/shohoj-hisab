@@ -29,6 +29,9 @@ export const TransactionSchema = z.object({
     .refine((m) => (PAYMENT_METHODS as readonly string[]).includes(m), "invalid payment method")
     .optional(),
   accountId: id.optional(),
+  reimbursable: z.boolean().optional(),
+  reimbursedAt: date.optional(),
+  reimbursementTxId: id.optional(),
   note: z.string().max(2000).optional(),
   createdAt: ts,
   updatedAt: ts,

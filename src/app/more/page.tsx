@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, HandCoins, PiggyBank, Repeat, Settings, Store, Utensils, Wallet } from "lucide-react";
+import { ChevronRight, HandCoins, PiggyBank, Receipt, Repeat, Settings, Store, Utensils, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/components/AppProvider";
@@ -32,6 +32,7 @@ export default function MorePage() {
     { href: "/debts", label: t("navDebts"), icon: HandCoins, color: "bg-sky-600" },
     { href: "/accounts", label: t("navAccounts"), icon: Wallet, color: "bg-teal-600" },
     { href: "/recurring", label: t("navRecurring"), icon: Repeat, color: "bg-violet-600" },
+    { href: "/reimbursements", label: t("navReimbursements"), icon: Receipt, color: "bg-rose-500" },
   ];
   const settingsItem = { href: "/settings", label: t("navSettings"), icon: Settings, color: "bg-slate-600" };
   const items = settings.mode === "personal" ? [...personalItems, settingsItem] : [settingsItem];
