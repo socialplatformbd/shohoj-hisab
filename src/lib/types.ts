@@ -40,6 +40,41 @@ export interface Transfer {
   createdAt: number;
 }
 
+/** অ্যাপের মোড: ব্যক্তিগত (ডিফল্ট) বা মেস */
+export type AppMode = "personal" | "mess";
+export const APP_MODES: readonly AppMode[] = ["personal", "mess"];
+
+/** মেসের সদস্য — ডেটা থাকলে মোছা হয় না, নিষ্ক্রিয় (active=false) করা হয় */
+export interface MessMember {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** একজন সদস্যের একদিনের মিল; halves = আধা-মিল (২ = ১টি মিল)। শূন্য হলে সারিই রাখা হয় না */
+export interface MessMeal {
+  id: string; // `${date}_${memberId}` — প্রতিদিন প্রতি সদস্যের একটিই সারি
+  date: string;
+  memberId: string;
+  halves: number;
+  updatedAt: number;
+}
+
+/** বাজার / জমা / সাধারণ খরচ (ভাড়া, বিদ্যুৎ ইত্যাদি — সবাই সমান ভাগে) */
+export type MessEntryKind = "bazaar" | "deposit" | "shared";
+export const MESS_ENTRY_KINDS: readonly MessEntryKind[] = ["bazaar", "deposit", "shared"];
+export interface MessEntry {
+  id: string;
+  kind: MessEntryKind;
+  memberId?: string; // জমা: যিনি দিয়েছেন (আবশ্যক); বাজার/সাধারণ খরচ: যিনি নিজের পকেট থেকে দিয়েছেন (না থাকলে পুলের টাকা থেকে)
+  amount: number;
+  date: string;
+  note?: string;
+  createdAt: number;
+}
+
 export interface Category {
   id: string;
   type: TxType;

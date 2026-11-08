@@ -102,6 +102,29 @@ export const TransferSchema = z.object({
   note: z.string().max(500).optional(),
   createdAt: ts,
 });
+export const MessMemberSchema = z.object({
+  id,
+  name: z.string().min(1).max(40),
+  active: z.boolean(),
+  createdAt: ts,
+  updatedAt: ts,
+});
+export const MessMealSchema = z.object({
+  id,
+  date,
+  memberId: id,
+  halves: z.number().int().min(1).max(24),
+  updatedAt: ts,
+});
+export const MessEntrySchema = z.object({
+  id,
+  kind: z.enum(["bazaar", "deposit", "shared"]),
+  memberId: id.optional(),
+  amount: paisa,
+  date,
+  note: z.string().max(500).optional(),
+  createdAt: ts,
+});
 export const SettingSchema = z.object({
   key: z.string().min(1).max(60),
   value: z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
@@ -121,6 +144,9 @@ export const BackupSchema = z.object({
     recurring: z.array(RecurringSchema).default([]), // পুরনো ব্যাকআপে এই অংশ নেই
     accounts: z.array(AccountSchema).default([]),
     transfers: z.array(TransferSchema).default([]),
+    messMembers: z.array(MessMemberSchema).default([]),
+    messMeals: z.array(MessMealSchema).default([]),
+    messEntries: z.array(MessEntrySchema).default([]),
     settings: z.array(SettingSchema),
   }),
 });
@@ -128,11 +154,11 @@ export const BackupSchema = z.object({
 export type BackupFile = z.infer<typeof BackupSchema>;
 
 /** শুধু সেটিংস যেগুলো ব্যাকআপে যাবে (ডিভাইস-নির্ভর অবস্থা নয়) */
-const PREFERENCE_KEYS = ["userName", "language", "digits", "theme", "budgetNotifications", "monthStartDay"];
+const PREFERENCE_KEYS = ["userName", "language", "digits", "theme", "budgetNotifications", "monthStartDay", "mode"];
 
 export async function buildBackup(): Promise<BackupFile> {
-  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.settings], async () => {
-    const [transactions, categories, budgets, debts, repayments, recurring, accounts, transfers, settings] = await Promise.all([
+  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.settings], async () => {
+    const [transactions, categories, budgets, debts, repayments, recurring, accounts, transfers, messMembers, messMeals, messEntries, settings] = await Promise.all([
       db.transactions.toArray(),
       db.categories.toArray(),
       db.budgets.toArray(),
@@ -141,6 +167,9 @@ export async function buildBackup(): Promise<BackupFile> {
       db.recurring.toArray(),
       db.accounts.toArray(),
       db.transfers.toArray(),
+      db.messMembers.toArray(),
+      db.messMeals.toArray(),
+      db.messEntries.toArray(),
       db.settings.toArray(),
     ]);
     return {
@@ -157,6 +186,9 @@ export async function buildBackup(): Promise<BackupFile> {
         recurring,
         accounts,
         transfers,
+        messMembers,
+        messMeals,
+        messEntries,
         settings: settings.filter((s) => PREFERENCE_KEYS.includes(s.key)),
       },
     };
@@ -200,7 +232,10 @@ export function validateBackupText(text: string): BackupFile {
     dupes(data.repayments.map((x) => x.id)) ||
     dupes(data.recurring.map((x) => x.id)) ||
     dupes(data.accounts.map((x) => x.id)) ||
-    dupes(data.transfers.map((x) => x.id))
+    dupes(data.transfers.map((x) => x.id)) ||
+    dupes(data.messMembers.map((x) => x.id)) ||
+    dupes(data.messMeals.map((x) => x.id)) ||
+    dupes(data.messEntries.map((x) => x.id))
   ) {
     throw new BackupError("invalid");
   }
@@ -209,6 +244,9 @@ export function validateBackupText(text: string): BackupFile {
   if (data.transactions.some((t) => !catIds.has(t.categoryId))) throw new BackupError("invalid");
   if (data.budgets.some((b) => b.categoryId !== null && !catIds.has(b.categoryId))) throw new BackupError("invalid");
   if (data.recurring.some((r) => !catIds.has(r.categoryId))) throw new BackupError("invalid");
+  const memberIds = new Set(data.messMembers.map((m) => m.id));
+  if (data.messMeals.some((m) => !memberIds.has(m.memberId))) throw new BackupError("invalid");
+  if (data.messEntries.some((e) => (e.memberId !== undefined && !memberIds.has(e.memberId)) || (e.kind === "deposit" && e.memberId === undefined))) throw new BackupError("invalid");
   const accIds = new Set(data.accounts.map((a) => a.id));
   if (data.transactions.some((t) => t.accountId !== undefined && !accIds.has(t.accountId))) throw new BackupError("invalid");
   if (data.recurring.some((r) => r.accountId !== undefined && !accIds.has(r.accountId))) throw new BackupError("invalid");
@@ -227,8 +265,8 @@ export function validateBackupText(text: string): BackupFile {
 /** একটি ট্রানজ্যাকশনে সব বদলায় — মাঝপথে ব্যর্থ হলে আগের ডেটা অক্ষত থাকে */
 export async function restoreBackup(file: BackupFile): Promise<void> {
   const d = file.data;
-  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.settings], async () => {
-    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear()]);
+  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.settings], async () => {
+    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear(), db.messMembers.clear(), db.messMeals.clear(), db.messEntries.clear()]);
     await db.categories.bulkAdd(d.categories);
     // ডিফল্ট খাত (যেমন "অন্যান্য খরচ") ব্যাকআপে না থাকলেও যেন থাকে — নইলে AI/ফলব্যাক এমন খাতে লেখে যা নেই
     const have = new Set(d.categories.map((c) => c.id));
@@ -241,6 +279,9 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
     await db.recurring.bulkAdd(d.recurring);
     await db.accounts.bulkAdd(d.accounts);
     await db.transfers.bulkAdd(d.transfers);
+    await db.messMembers.bulkAdd(d.messMembers);
+    await db.messMeals.bulkAdd(d.messMeals);
+    await db.messEntries.bulkAdd(d.messEntries);
     await db.settings.bulkPut(d.settings);
   });
 }

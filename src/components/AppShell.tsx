@@ -1,8 +1,8 @@
 "use client";
 
-import { BarChart3, Bot, Home, ListChecks, MoreHorizontal, Plus, WifiOff } from "lucide-react";
+import { Banknote, BarChart3, Bot, CalendarDays, Home, ListChecks, MoreHorizontal, Plus, Users, Utensils, WifiOff } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { useApp } from "./AppProvider";
 import { LockGate } from "./LockGate";
@@ -18,6 +18,7 @@ const MORE_PATHS = ["/more", "/budgets", "/debts", "/accounts", "/recurring", "/
 export function AppShell({ children }: { children: ReactNode }) {
   const { ready, dbError, settings, t, online, toast } = useApp();
   const pathname = usePathname();
+  const router = useRouter();
   const form = useTxForm();
   const [mounted, setMounted] = useState(false);
 
@@ -56,6 +57,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [ready, welcomeDone, toast, t]);
 
+  // মোড অনুযায়ী পেজ: মেস মোডে মেসের পেজ (+ আরও/সেটিংস), ব্যক্তিগত মোডে মেসের পেজ নয়
+  const mode = settings.mode;
+  useEffect(() => {
+    if (!ready || !welcomeDone) return;
+    const inMess = pathname.startsWith("/mess");
+    if (mode === "mess" && !inMess && pathname !== "/more" && pathname !== "/settings") router.replace("/mess");
+    else if (mode === "personal" && inMess) router.replace("/");
+  }, [ready, welcomeDone, mode, pathname, router]);
+
   if (!mounted || (!ready && !dbError)) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4">
@@ -84,14 +94,22 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (!settings.welcomeDone) return <Welcome />;
 
-  const nav = [
+  const messNav = [
+    { href: "/mess", label: t("messHome"), icon: Utensils, active: pathname === "/mess" },
+    { href: "/mess/meals", label: t("messMeals"), icon: CalendarDays, active: pathname.startsWith("/mess/meals") },
+    { href: "/mess/entries", label: t("messMoney"), icon: Banknote, active: pathname.startsWith("/mess/entries") },
+    { href: "/mess/members", label: t("messMembers"), icon: Users, active: pathname.startsWith("/mess/members") },
+    { href: "/more", label: t("navMore"), icon: MoreHorizontal, active: pathname === "/more" || pathname.startsWith("/settings") },
+  ];
+  const personalNav = [
     { href: "/", label: t("navHome"), icon: Home, active: pathname === "/" },
     { href: "/transactions", label: t("navTransactions"), icon: ListChecks, active: pathname.startsWith("/transactions") },
     { href: "/ai", label: t("navAi"), icon: Bot, active: pathname.startsWith("/ai") },
     { href: "/reports", label: t("navReports"), icon: BarChart3, active: pathname.startsWith("/reports") },
     { href: "/more", label: t("navMore"), icon: MoreHorizontal, active: MORE_PATHS.some((p) => pathname.startsWith(p)) },
   ];
-  const showFab = pathname === "/" || pathname.startsWith("/transactions");
+  const nav = mode === "mess" ? messNav : personalNav;
+  const showFab = mode === "personal" && (pathname === "/" || pathname.startsWith("/transactions"));
 
   return (
     <LockGate>
@@ -100,7 +118,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex items-center gap-3 px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
           <Logo size={36} />
           <div className="min-w-0 flex-1 leading-tight">
-            <p className="text-lg font-extrabold text-emerald-700 dark:text-emerald-400">{t("appName")}</p>
+            <p className="text-lg font-extrabold text-emerald-700 dark:text-emerald-400">
+              {t("appName")}
+              {mode === "mess" && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 align-middle text-xs font-semibold text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">{t("modeMess")}</span>}
+            </p>
             {settings.userName && (
               <p className="truncate text-xs text-muted">
                 {t("hello")}, {settings.userName}

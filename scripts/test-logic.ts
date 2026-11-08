@@ -15,7 +15,8 @@ import { localAnswer } from "../src/lib/insights";
 import { dueOccurrences, defaultStartMonth, generateRecurring, occurrenceId, scheduledDate } from "../src/lib/recurring";
 import { PIN_RE, hashPin, makeSalt, normalizePin, verifyPin } from "../src/lib/pin";
 import { accountSummary } from "../src/lib/accounts";
-import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer } from "../src/lib/types";
+import { allocate, messSummary, mealId } from "../src/lib/mess";
+import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember } from "../src/lib/types";
 
 let n = 0;
 const ok = (name: string, fn: () => void | Promise<void>) =>
@@ -406,6 +407,78 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     await eraseAllData();
     assert.equal(await db.accounts.count(), 0);
     assert.equal(await db.transfers.count(), 0);
+  });
+
+  console.log("মেস মোড");
+  await ok("ভাগ (allocate): যোগফল সব সময় ঠিক", () => {
+    assert.deepEqual(allocate(100, [1, 1, 1]), [34, 33, 33]);
+    assert.deepEqual(allocate(0, [1, 2]), [0, 0]);
+    assert.deepEqual(allocate(100, [0, 0]), [0, 0]);
+    assert.deepEqual(allocate(10, [3, 0, 7]), [3, 0, 7]);
+    for (let i = 0; i < 2000; i++) {
+      const w = Array.from({ length: 1 + Math.floor(Math.random() * 8) }, () => Math.floor(Math.random() * 40));
+      const total = Math.floor(Math.random() * 1e9);
+      const a = allocate(total, w);
+      assert.equal(a.reduce((x, y) => x + y, 0), w.reduce((x, y) => x + y, 0) > 0 ? total : 0);
+    }
+    assert.equal(allocate(999_999_999_999, [3, 3, 3, 1]).reduce((x, y) => x + y, 0), 999_999_999_999);
+  });
+  await ok("মেসের মাসিক হিসাব: মিল-রেট, সাধারণ ভাগ, ব্যালেন্স ও পুল", () => {
+    const mem = (id: string, active = true): MessMember => ({ id, name: id, active, createdAt: 1, updatedAt: 1 });
+    const meal = (d: string, memberId: string, halves: number): MessMeal => ({ id: mealId(d, memberId), date: d, memberId, halves, updatedAt: 1 });
+    const ent = (o: Partial<MessEntry>): MessEntry => ({ id: newId(), kind: "bazaar", amount: 100, date: "2026-11-03", createdAt: 1, ...o });
+    const members = [mem("a"), mem("b"), mem("c"), mem("old", false)];
+    const meals = [meal("2026-11-01", "a", 2), meal("2026-11-01", "b", 2), meal("2026-11-02", "a", 4), meal("2026-11-02", "c", 1), meal("2026-10-30", "b", 2)];
+    const entries = [
+      ent({ kind: "deposit", memberId: "a", amount: 100000 }),
+      ent({ kind: "deposit", memberId: "b", amount: 50000 }),
+      ent({ kind: "bazaar", memberId: "a", amount: 30000 }),
+      ent({ kind: "bazaar", amount: 20000 }),
+      ent({ kind: "shared", memberId: "c", amount: 90000 }),
+      ent({ kind: "bazaar", amount: 99999, date: "2026-10-31" }),
+    ];
+    const sm = messSummary(members, meals, entries, "2026-11");
+    assert.deepEqual(sm.rows.map((r) => r.member.id), ["a", "b", "c"]);
+    assert.equal(sm.totalBazaar, 50000);
+    assert.equal(sm.totalShared, 90000);
+    assert.equal(sm.totalHalves, 9);
+    assert.equal(sm.rows.reduce((x, r) => x + r.mealCost, 0), 50000);
+    assert.deepEqual(sm.rows.map((r) => r.shared), [30000, 30000, 30000]);
+    assert.equal(sm.pool, 150000 + 30000 + 90000 - 50000 - 90000);
+    assert.equal(messSummary(members, [...meals, meal("2026-11-05", "old", 2)], entries, "2026-11").rows.some((r) => r.member.id === "old"), true);
+    assert.equal(messSummary(members, [], entries, "2026-11").noMeals, true);
+  });
+  await ok("মেসের ডেটা ব্যাকআপে যায়-ফেরে; অবৈধ সদস্য-রেফারেন্স প্রত্যাখ্যাত; পুরনো ব্যাকআপ চলে", async () => {
+    await eraseAllData();
+    const now = Date.now();
+    await db.messMembers.bulkAdd([
+      { id: "m1", name: "রাকিব", active: true, createdAt: now, updatedAt: now },
+      { id: "m2", name: "করিম", active: true, createdAt: now, updatedAt: now },
+    ]);
+    await db.messMeals.add({ id: mealId("2026-11-01", "m1"), date: "2026-11-01", memberId: "m1", halves: 3, updatedAt: now });
+    await db.messEntries.bulkAdd([
+      { id: "e1", kind: "deposit", memberId: "m1", amount: 100000, date: "2026-11-01", createdAt: now },
+      { id: "e2", kind: "bazaar", amount: 30000, date: "2026-11-02", createdAt: now },
+    ]);
+    const text5 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    assert.equal(await db.messMembers.count(), 0);
+    await restoreBackup(validateBackupText(text5));
+    assert.equal(await db.messMembers.count(), 2);
+    assert.equal(await db.messMeals.count(), 1);
+    assert.equal(await db.messEntries.count(), 2);
+    const bad = JSON.parse(text5);
+    bad.data.messMeals[0].memberId = "nope";
+    assert.throws(() => validateBackupText(JSON.stringify(bad)), (e: unknown) => e instanceof BackupError);
+    const bad2 = JSON.parse(text5);
+    delete bad2.data.messEntries.find((x: MessEntry) => x.kind === "deposit").memberId;
+    assert.throws(() => validateBackupText(JSON.stringify(bad2)), (e: unknown) => e instanceof BackupError);
+    const old = JSON.parse(text5);
+    delete old.data.messMembers;
+    delete old.data.messMeals;
+    delete old.data.messEntries;
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.messMembers, []);
+    await eraseAllData();
   });
 
   console.log("এনক্রিপ্টেড ব্যাকআপ");

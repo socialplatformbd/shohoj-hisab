@@ -4,7 +4,7 @@
  */
 const VERSION = "v2";
 const SHELL_CACHE = `shohoj-hisab-shell-${VERSION}`;
-const ROUTES = ["/", "/transactions", "/reports", "/budgets", "/debts", "/accounts", "/recurring", "/ai", "/settings", "/more"];
+const ROUTES = ["/", "/transactions", "/reports", "/budgets", "/debts", "/accounts", "/recurring", "/mess", "/mess/meals", "/mess/entries", "/mess/members", "/ai", "/settings", "/more"];
 const STATIC = ["/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png", "/icon.svg"];
 
 async function precache() {
