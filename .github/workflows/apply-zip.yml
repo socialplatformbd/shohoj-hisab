@@ -25,13 +25,14 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          zips=(./*.zip)
-          if [ ${#zips[@]} -eq 0 ]; then
+          files=(./*.zip)
+          if [ ${#files[@]} -eq 0 ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
             echo "রুটে কোনো .zip ফাইল নেই — কিছু করার নেই।"
             exit 0
           fi
-          # পুরনো থেকে নতুন ক্রমে (নাম অনুযায়ী) প্রয়োগ
+          # আপলোডের (কমিটের) সময় অনুযায়ী পুরনো থেকে নতুন ক্রমে প্রয়োগ — সবচেয়ে নতুন জিপ সবার শেষে বসে, তাই জয়ী হয়
+          mapfile -t zips < <(for f in "${files[@]}"; do printf '%s\t%s\n' "$(git log -1 --format=%ct -- "$f")" "$f"; done | sort -n | cut -f2-)
           for f in "${zips[@]}"; do
             echo "আনজিপ হচ্ছে: $f"
             unzip -o -q "$f"
