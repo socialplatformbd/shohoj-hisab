@@ -1,11 +1,13 @@
 "use client";
 
 import { Plus } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
 import { SHOP_KIND_LABEL, ShopEntrySheet } from "@/components/ShopEntrySheet";
 import { PageHeader } from "@/components/ui";
 import { endOfMonth, startOfMonth, todayDhaka } from "@/lib/dates";
+import { stockSummary } from "@/lib/products";
 import { shopSummary } from "@/lib/shop";
 import type { ShopEntryKind } from "@/lib/types";
 
@@ -13,7 +15,7 @@ type Period = "today" | "month" | "all";
 const QUICK: ShopEntryKind[] = ["sale", "purchase", "expense", "receive"];
 
 export default function ShopHomePage() {
-  const { t, data, money, dataReady } = useApp();
+  const { t, data, money, num, dataReady } = useApp();
   const [period, setPeriod] = useState<Period>("today");
   const [adding, setAdding] = useState<ShopEntryKind | null>(null);
   const today = todayDhaka();
@@ -22,6 +24,8 @@ export default function ShopHomePage() {
     const [from, to] = period === "today" ? [today, today] : period === "month" ? [startOfMonth(today), endOfMonth(today)] : [null, null];
     return shopSummary(data.shopEntries, data.shopParties, from, to);
   }, [data.shopEntries, data.shopParties, period, today]);
+
+  const stock = useMemo(() => stockSummary(data.shopProducts, data.shopEntries, data.shopAdjustments), [data.shopProducts, data.shopEntries, data.shopAdjustments]);
 
   if (!dataReady) return null;
 
@@ -74,6 +78,15 @@ export default function ShopHomePage() {
           </div>
         ))}
       </div>
+      {data.shopProducts.length > 0 && (
+        <Link href="/shop/products" className="card mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-muted">{t("prodValue")}</p>
+            <p className="text-lg font-bold">{money(stock.totalValue)}</p>
+          </div>
+          {stock.lowCount + stock.outCount > 0 && <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">{t("prodAlertText", { low: num(stock.lowCount), out: num(stock.outCount) })}</p>}
+        </Link>
+      )}
       <p className="text-xs text-muted">{t("shopProfitHint")}</p>
 
       {adding && <ShopEntrySheet defaultKind={adding} onClose={() => setAdding(null)} />}

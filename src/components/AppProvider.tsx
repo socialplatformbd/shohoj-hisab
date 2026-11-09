@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { BN_MONTHS, BN_MONTHS_SHORT, BN_WEEKDAYS, EN_MONTHS, EN_MONTHS_SHORT, EN_WEEKDAYS, normalizeStartDay, weekdayIndex } from "@/lib/dates";
 import { db, setSetting } from "@/lib/db";
 import type { DataBundle } from "@/lib/insights";
-import type { Account, AppMode, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty, Transfer } from "@/lib/types";
+import type { Account, AppMode, MessEntry, MessMeal, MessMember, ShopAdjustment, ShopEntry, ShopParty, ShopProduct, Transfer } from "@/lib/types";
 import { translate, type TKey } from "@/lib/i18n";
 import { applyDigits, formatMoney } from "@/lib/money";
 import type { Category, Digits, Lang, SettingRow, Theme } from "@/lib/types";
@@ -68,8 +68,8 @@ export function useApp(): AppCtx {
 }
 
 /** অ্যাপের সব ডেটা (AI-র DataBundle + অ্যাকাউন্ট ও ট্রান্সফার) */
-export type AppData = DataBundle & { accounts: Account[]; transfers: Transfer[]; messMembers: MessMember[]; messMeals: MessMeal[]; messEntries: MessEntry[]; shopParties: ShopParty[]; shopEntries: ShopEntry[] };
-const EMPTY: AppData = { transactions: [], categories: [], budgets: [], debts: [], repayments: [], accounts: [], transfers: [], messMembers: [], messMeals: [], messEntries: [], shopParties: [], shopEntries: [] };
+export type AppData = DataBundle & { accounts: Account[]; transfers: Transfer[]; messMembers: MessMember[]; messMeals: MessMeal[]; messEntries: MessEntry[]; shopParties: ShopParty[]; shopEntries: ShopEntry[]; shopProducts: ShopProduct[]; shopAdjustments: ShopAdjustment[] };
+const EMPTY: AppData = { transactions: [], categories: [], budgets: [], debts: [], repayments: [], accounts: [], transfers: [], messMembers: [], messMeals: [], messEntries: [], shopParties: [], shopEntries: [], shopProducts: [], shopAdjustments: [] };
 
 const TOAST_ICON = { success: CheckCircle2, error: XCircle, warn: AlertTriangle, info: Info };
 const TOAST_STYLE: Record<ToastKind, string> = {
@@ -91,7 +91,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dbError, setDbError] = useState(false);
   const settingRows = useLiveQuery(() => db.settings.toArray(), []);
   const data = useLiveQuery(async () => {
-    const [transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries] = await Promise.all([
+    const [transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments] = await Promise.all([
       db.transactions.toArray(),
       db.categories.toArray(),
       db.budgets.toArray(),
@@ -104,8 +104,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       db.messEntries.toArray(),
       db.shopParties.toArray(),
       db.shopEntries.toArray(),
+      db.shopProducts.toArray(),
+      db.shopAdjustments.toArray(),
     ]);
-    return { transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries } satisfies AppData;
+    return { transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments } satisfies AppData;
   }, []);
 
   useEffect(() => {

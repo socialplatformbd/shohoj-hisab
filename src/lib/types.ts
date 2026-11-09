@@ -58,6 +58,33 @@ export interface ShopParty {
   updatedAt: number;
 }
 
+/** পণ্যের একক — তালিকা PRODUCT_UNITS-এ; লেবেল i18n-এ `unit_<নাম>` */
+export const PRODUCT_UNITS = ["pcs", "kg", "litre", "dozen", "packet", "box", "bag", "meter"] as const;
+export type ProductUnit = (typeof PRODUCT_UNITS)[number];
+
+/** দোকানের পণ্য। পরিমাণ সব জায়গায় পূর্ণসংখ্যায় — ১ একক = ১০০০ (তিন দশমিক পর্যন্ত নির্ভুল) */
+export interface ShopProduct {
+  id: string;
+  name: string;
+  unit: string; // PRODUCT_UNITS-এর একটি
+  buyPrice: number; // প্রতি একক ক্রয়মূল্য (paisa); না জানলে ০
+  sellPrice: number; // প্রতি একক বিক্রয়মূল্য (paisa); না জানলে ০
+  openingStock: number; // শুরুর স্টক (×১০০০)
+  minStock: number; // এর নিচে নামলে "কম স্টক" (×১০০০); ০ = সতর্কতা নেই
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** স্টক গুনে দেখে বা নষ্ট/হারানোর কারণে হাতে-কলমে সংশোধন; delta (×১০০০) ধনাত্মক বা ঋণাত্মক */
+export interface ShopAdjustment {
+  id: string;
+  productId: string;
+  delta: number;
+  date: string;
+  note?: string;
+  createdAt: number;
+}
+
 /**
  * sale = বিক্রি, purchase = মাল ক্রয়, expense = দোকানের খরচ,
  * receive = কাস্টমারের বাকি আদায়, pay = সরবরাহকারীর দেনা পরিশোধ
@@ -71,6 +98,8 @@ export interface ShopEntry {
   paidAmount?: number; // বিক্রি/ক্রয়ে এখনই যা নেওয়া/দেওয়া হয়েছে; না থাকলে পুরোটাই নগদ
   partyId?: string; // বাকি/আদায়/পরিশোধে আবশ্যক
   category?: string; // দোকানের খরচের খাত (নিজের লেখাও চলে)
+  productId?: string; // বিক্রি/ক্রয়ে পণ্য (স্টক হিসাবের জন্য)
+  qty?: number; // ওই পণ্যের পরিমাণ (×১০০০); productId থাকলে আবশ্যক
   note?: string;
   date: string;
   createdAt: number;

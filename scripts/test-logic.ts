@@ -18,8 +18,9 @@ import { accountSummary } from "../src/lib/accounts";
 import { allocate, messSummary, mealId } from "../src/lib/mess";
 import { paidOf, creditOf, partyBalances, shopSummary, shopEntryValid } from "../src/lib/shop";
 import { parseAmountOrZero } from "../src/lib/money";
+import { parseQty, parseQtyOrZero, formatQty, lineTotal, stockSummary, MAX_QTY } from "../src/lib/products";
 import { markReceived, undoReceived, isPending, isReceived, pendingTotal, reimbursementIncomeId, REIMBURSEMENT_CATEGORY_ID } from "../src/lib/reimburse";
-import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty } from "../src/lib/types";
+import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty, ShopProduct, ShopAdjustment } from "../src/lib/types";
 
 let n = 0;
 const ok = (name: string, fn: () => void | Promise<void>) =>
@@ -557,6 +558,75 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     delete old.data.shopParties;
     delete old.data.shopEntries;
     assert.deepEqual(validateBackupText(JSON.stringify(old)).data.shopEntries, []);
+    await eraseAllData();
+  });
+
+  console.log("পণ্য ও স্টক");
+  await ok("পরিমাণ পার্স/ফরম্যাট ও লাইন-মোট (ভাসমান-সংখ্যার ভুল নেই)", () => {
+    assert.equal(parseQty("2.5"), 2500);
+    assert.equal(parseQty("২.৫"), 2500);
+    assert.equal(parseQty("0.001"), 1);
+    assert.equal(parseQty("0"), null);
+    assert.equal(parseQty("1.2345"), null);
+    assert.equal(parseQtyOrZero(""), 0);
+    assert.equal(parseQty("0.1")! + parseQty("0.2")!, 300);
+    assert.equal(formatQty(2500), "2.5");
+    assert.equal(formatQty(-500), "-0.5");
+    assert.equal(lineTotal(2500, 12000), 30000);
+    assert.equal(lineTotal(500, 1), 1);
+    assert.equal(lineTotal(MAX_QTY, 999_999_999_999), null);
+  });
+  await ok("স্টক = শুরুর + ক্রয় − বিক্রি ± সংশোধন; কম/শেষ সতর্কতা; মূল্য", () => {
+    const P = (id: string, o: Partial<ShopProduct> = {}): ShopProduct => ({ id, name: id, unit: "kg", buyPrice: 0, sellPrice: 0, openingStock: 0, minStock: 0, createdAt: 1, updatedAt: 1, ...o });
+    const E = (o: Partial<ShopEntry>): ShopEntry => ({ id: newId(), kind: "sale", amount: 100, date: "2026-11-03", createdAt: 1, ...o });
+    const A = (productId: string, delta: number): ShopAdjustment => ({ id: newId(), productId, delta, date: "2026-11-03", createdAt: 1 });
+    const products = [P("rice", { openingStock: 10000, buyPrice: 6000, minStock: 5000 }), P("oil", { openingStock: 2000, minStock: 1000 }), P("salt"), P("sugar", { openingStock: 3000, buyPrice: 10000 })];
+    const entries = [E({ kind: "purchase", productId: "rice", qty: 5000 }), E({ kind: "sale", productId: "rice", qty: 8500 }), E({ kind: "sale", productId: "oil", qty: 1500 }), E({ kind: "sale", productId: "salt", qty: 1000 }), E({ kind: "sale", amount: 5 })];
+    const sm = stockSummary(products, entries, [A("rice", -500), A("sugar", 250)]);
+    const r = Object.fromEntries(sm.rows.map((x) => [x.product.id, x]));
+    assert.equal(r.rice.stock, 6000);
+    assert.equal(r.rice.low, false);
+    assert.equal(r.oil.stock, 500);
+    assert.equal(r.oil.low, true);
+    assert.equal(r.salt.stock, -1000);
+    assert.equal(r.salt.out, true);
+    assert.equal(r.sugar.value, lineTotal(3250, 10000));
+    assert.equal(sm.lowCount, 1);
+    assert.equal(sm.outCount, 0);
+    const pm = new Map<string, ShopParty>();
+    const ids = new Set(["rice"]);
+    assert.ok(shopEntryValid(E({ kind: "sale", productId: "rice", qty: 1000 }), pm, ids));
+    assert.ok(!shopEntryValid(E({ kind: "sale", productId: "rice" }), pm, ids));
+    assert.ok(!shopEntryValid(E({ kind: "sale", productId: "ghost", qty: 1000 }), pm, ids));
+    assert.ok(!shopEntryValid(E({ kind: "expense", productId: "rice", qty: 1000 }), pm, ids));
+  });
+  await ok("পণ্য, স্টক-সংশোধন ও এন্ট্রির পণ্য-লিংক ব্যাকআপে যায়-ফেরে; অবৈধ রেফারেন্স প্রত্যাখ্যাত; পুরনো ব্যাকআপ চলে", async () => {
+    await eraseAllData();
+    const now = Date.now();
+    await db.shopProducts.add({ id: "pr1", name: "চাল", unit: "kg", buyPrice: 6000, sellPrice: 7000, openingStock: 10000, minStock: 2000, createdAt: now, updatedAt: now });
+    await db.shopAdjustments.add({ id: "ad1", productId: "pr1", delta: -500, date: "2026-11-02", note: "নষ্ট", createdAt: now });
+    await db.shopEntries.add({ id: "pe1", kind: "sale", amount: 21000, productId: "pr1", qty: 3000, date: "2026-11-03", createdAt: now });
+    const text8 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    assert.equal(await db.shopProducts.count(), 0);
+    await restoreBackup(validateBackupText(text8));
+    assert.equal(await db.shopProducts.count(), 1);
+    assert.equal(await db.shopAdjustments.count(), 1);
+    assert.equal((await db.shopEntries.get("pe1"))?.qty, 3000);
+    const bad = JSON.parse(text8);
+    bad.data.shopEntries[0].productId = "nope";
+    assert.throws(() => validateBackupText(JSON.stringify(bad)), (e: unknown) => e instanceof BackupError);
+    const bad2 = JSON.parse(text8);
+    bad2.data.shopAdjustments[0].productId = "nope";
+    assert.throws(() => validateBackupText(JSON.stringify(bad2)), (e: unknown) => e instanceof BackupError);
+    const bad3 = JSON.parse(text8);
+    delete bad3.data.shopEntries[0].qty;
+    assert.throws(() => validateBackupText(JSON.stringify(bad3)), (e: unknown) => e instanceof BackupError);
+    const old = JSON.parse(text8);
+    delete old.data.shopProducts;
+    delete old.data.shopAdjustments;
+    old.data.shopEntries = [];
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.shopProducts, []);
     await eraseAllData();
   });
 

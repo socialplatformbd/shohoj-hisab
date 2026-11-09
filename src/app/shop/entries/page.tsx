@@ -7,6 +7,7 @@ import { SHOP_KIND_LABEL, ShopEntrySheet } from "@/components/ShopEntrySheet";
 import { EmptyState, PageHeader } from "@/components/ui";
 import { addMonths, monthKey, todayDhaka } from "@/lib/dates";
 import { db } from "@/lib/db";
+import { formatQty } from "@/lib/products";
 import { creditOf } from "@/lib/shop";
 import { SHOP_ENTRY_KINDS, type ShopEntry, type ShopEntryKind } from "@/lib/types";
 
@@ -14,12 +15,13 @@ type Filter = "all" | ShopEntryKind;
 const IN_KINDS: ShopEntryKind[] = ["sale", "receive"];
 
 export default function ShopEntriesPage() {
-  const { t, data, money, date, monthLabel, toast, confirm, dataReady } = useApp();
+  const { t, data, money, num, date, monthLabel, toast, confirm, dataReady } = useApp();
   const [month, setMonth] = useState(monthKey(todayDhaka()));
   const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<{ entry?: ShopEntry } | null>(null);
 
   const nameOf = useMemo(() => new Map(data.shopParties.map((p) => [p.id, p.name])), [data.shopParties]);
+  const productOf = useMemo(() => new Map(data.shopProducts.map((p) => [p.id, p.name])), [data.shopProducts]);
   const list = useMemo(
     () =>
       data.shopEntries
@@ -101,6 +103,7 @@ export default function ShopEntriesPage() {
                     </p>
                     <p className="text-sm text-muted">
                       {date(e.date)}
+                      {e.productId && e.qty ? ` • ${productOf.get(e.productId) ?? "—"} × ${num(formatQty(e.qty))}` : ""}
                       {e.note ? ` • ${e.note}` : ""}
                     </p>
                     {due > 0 && <p className="text-xs font-medium text-amber-700 dark:text-amber-400">{t("shopDueLeft", { a: money(due) })}</p>}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, BarChart3, Bot, CalendarDays, Home, ListChecks, MoreHorizontal, Plus, Receipt, Store, Users, Utensils, WifiOff } from "lucide-react";
+import { Banknote, BarChart3, Bot, CalendarDays, Home, ListChecks, MoreHorizontal, Package, Plus, Receipt, Store, Users, Utensils, WifiOff } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -108,6 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const shopNav = [
     { href: "/shop", label: t("shopHome"), icon: Store, active: pathname === "/shop" },
     { href: "/shop/entries", label: t("shopBook"), icon: Receipt, active: pathname.startsWith("/shop/entries") },
+    { href: "/shop/products", label: t("shopProducts"), icon: Package, active: pathname.startsWith("/shop/products") },
     { href: "/shop/parties", label: t("shopParties"), icon: Users, active: pathname.startsWith("/shop/parties") },
     { href: "/more", label: t("navMore"), icon: MoreHorizontal, active: pathname === "/more" || pathname.startsWith("/settings") },
   ];

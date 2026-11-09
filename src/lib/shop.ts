@@ -94,7 +94,13 @@ export function shopSummary(entries: ShopEntry[], parties: ShopParty[], from: st
 }
 
 /** এন্ট্রি বৈধ কিনা: সঠিক ধরনের পক্ষ, বাকি থাকলে পক্ষ আবশ্যক, paidAmount ≤ amount */
-export function shopEntryValid(e: ShopEntry, parties: Map<string, ShopParty>): boolean {
+export function shopEntryValid(e: ShopEntry, parties: Map<string, ShopParty>, productIds?: Set<string>): boolean {
+  // পণ্য: শুধু বিক্রি/ক্রয়ে, পরিমাণ ধনাত্মক ও আবশ্যক; পণ্য ছাড়া পরিমাণ থাকতে পারে না
+  if (e.productId !== undefined) {
+    if (e.kind !== "sale" && e.kind !== "purchase") return false;
+    if (!(typeof e.qty === "number" && e.qty > 0)) return false;
+    if (productIds && !productIds.has(e.productId)) return false;
+  } else if (e.qty !== undefined) return false;
   if (e.paidAmount !== undefined && (e.paidAmount < 0 || e.paidAmount > e.amount)) return false;
   if (e.paidAmount !== undefined && e.kind !== "sale" && e.kind !== "purchase") return false;
   const party = e.partyId !== undefined ? parties.get(e.partyId) : undefined;
