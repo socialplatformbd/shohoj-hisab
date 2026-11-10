@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownLeft, ArrowUpRight, PiggyBank, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Coins, Wallet } from "lucide-react";
 import { useState } from "react";
 import { dhakaDateOf } from "@/lib/dates";
 import { db } from "@/lib/db";
@@ -10,7 +10,7 @@ import { useApp } from "./AppProvider";
 import { useTxForm } from "./TransactionForm";
 import { Sheet, TYPE_STYLE } from "./ui";
 
-const ICONS = { income: ArrowDownLeft, expense: ArrowUpRight, saving: PiggyBank, withdraw: Wallet } as const;
+const ICONS = { income: ArrowDownLeft, expense: ArrowUpRight, saving: Coins, withdraw: Wallet } as const;
 const TYPE_LABEL = { income: "typeIncome", expense: "typeExpense", saving: "typeSaving", withdraw: "typeWithdraw" } as const;
 const isMethod = (m: string): m is (typeof PAYMENT_METHODS)[number] => (PAYMENT_METHODS as readonly string[]).includes(m);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Copy, Pencil, PiggyBank, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Pencil, Plus, Target, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
 import { EmptyState, Field, PageHeader, ProgressBar, Sheet } from "@/components/ui";
@@ -119,7 +119,7 @@ export default function BudgetsPage() {
 
       {statuses.length === 0 ? (
         <EmptyState
-          icon={<PiggyBank className="h-8 w-8" />}
+          icon={<Target className="h-8 w-8" />}
           title={t("noBudgetsTitle")}
           hint={t("noBudgetsHint")}
           action={

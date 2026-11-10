@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownLeft, ArrowUpRight, BarChart3, Bot, HandCoins, Landmark, PiggyBank, Receipt } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, BarChart3, Bot, Coins, HandCoins, Landmark, Receipt } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
@@ -134,7 +134,7 @@ export default function Dashboard() {
       <section className="grid grid-cols-2 gap-3">
         <StatCard label={t("totalIncome")} value={money(period.income)} cls="text-emerald-600 dark:text-emerald-400" icon={<ArrowDownLeft className="h-4 w-4" />} />
         <StatCard label={t("totalExpense")} value={money(period.expense)} cls="text-rose-600 dark:text-rose-400" icon={<ArrowUpRight className="h-4 w-4" />} />
-        <StatCard label={t("totalSavings")} value={money(all.savings)} cls="text-sky-600 dark:text-sky-400" icon={<PiggyBank className="h-4 w-4" />} />
+        <StatCard label={t("totalSavings")} value={money(all.savings)} cls="text-sky-600 dark:text-sky-400" icon={<Coins className="h-4 w-4" />} />
         <StatCard
           label={t("periodNet")}
           value={money(period.income - period.expense)}
