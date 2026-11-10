@@ -176,6 +176,13 @@ export const ShopAdjustmentSchema = z.object({
   note: z.string().max(200).optional(),
   createdAt: ts,
 });
+export const MessBudgetSchema = z.object({
+  id: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  amount: paisa,
+  createdAt: ts,
+  updatedAt: ts,
+});
 export const SettingSchema = z.object({
   key: z.string().min(1).max(60),
   value: z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
@@ -202,6 +209,7 @@ export const BackupSchema = z.object({
     shopEntries: z.array(ShopEntrySchema).default([]),
     shopProducts: z.array(ShopProductSchema).default([]),
     shopAdjustments: z.array(ShopAdjustmentSchema).default([]),
+    messBudgets: z.array(MessBudgetSchema).default([]),
     settings: z.array(SettingSchema),
   }),
 });
@@ -212,8 +220,8 @@ export type BackupFile = z.infer<typeof BackupSchema>;
 const PREFERENCE_KEYS = ["userName", "language", "digits", "theme", "budgetNotifications", "monthStartDay", "mode"];
 
 export async function buildBackup(): Promise<BackupFile> {
-  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.shopParties, db.shopEntries, db.shopProducts, db.shopAdjustments, db.settings], async () => {
-    const [transactions, categories, budgets, debts, repayments, recurring, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments, settings] = await Promise.all([
+  return db.transaction("r", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.shopParties, db.shopEntries, db.shopProducts, db.shopAdjustments, db.messBudgets, db.settings], async () => {
+    const [transactions, categories, budgets, debts, repayments, recurring, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments, messBudgets, settings] = await Promise.all([
       db.transactions.toArray(),
       db.categories.toArray(),
       db.budgets.toArray(),
@@ -229,6 +237,7 @@ export async function buildBackup(): Promise<BackupFile> {
       db.shopEntries.toArray(),
       db.shopProducts.toArray(),
       db.shopAdjustments.toArray(),
+      db.messBudgets.toArray(),
       db.settings.toArray(),
     ]);
     return {
@@ -252,6 +261,7 @@ export async function buildBackup(): Promise<BackupFile> {
         shopEntries,
         shopProducts,
         shopAdjustments,
+        messBudgets,
         settings: settings.filter((s) => PREFERENCE_KEYS.includes(s.key)),
       },
     };
@@ -302,7 +312,8 @@ export function validateBackupText(text: string): BackupFile {
     dupes(data.shopParties.map((x) => x.id)) ||
     dupes(data.shopEntries.map((x) => x.id)) ||
     dupes(data.shopProducts.map((x) => x.id)) ||
-    dupes(data.shopAdjustments.map((x) => x.id))
+    dupes(data.shopAdjustments.map((x) => x.id)) ||
+    dupes(data.messBudgets.map((x) => x.month))
   ) {
     throw new BackupError("invalid");
   }
@@ -318,6 +329,7 @@ export function validateBackupText(text: string): BackupFile {
   const productIds = new Set(data.shopProducts.map((p) => p.id));
   if (data.shopEntries.some((e) => !shopEntryValid(e, partyMap, productIds))) throw new BackupError("invalid");
   if (data.shopAdjustments.some((a) => !productIds.has(a.productId))) throw new BackupError("invalid");
+  if (data.messBudgets.some((b) => b.id !== b.month)) throw new BackupError("invalid");
   const accIds = new Set(data.accounts.map((a) => a.id));
   if (data.transactions.some((t) => t.accountId !== undefined && !accIds.has(t.accountId))) throw new BackupError("invalid");
   if (data.recurring.some((r) => r.accountId !== undefined && !accIds.has(r.accountId))) throw new BackupError("invalid");
@@ -336,8 +348,8 @@ export function validateBackupText(text: string): BackupFile {
 /** একটি ট্রানজ্যাকশনে সব বদলায় — মাঝপথে ব্যর্থ হলে আগের ডেটা অক্ষত থাকে */
 export async function restoreBackup(file: BackupFile): Promise<void> {
   const d = file.data;
-  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.shopParties, db.shopEntries, db.shopProducts, db.shopAdjustments, db.settings], async () => {
-    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear(), db.messMembers.clear(), db.messMeals.clear(), db.messEntries.clear(), db.shopParties.clear(), db.shopEntries.clear(), db.shopProducts.clear(), db.shopAdjustments.clear()]);
+  await db.transaction("rw", [db.transactions, db.categories, db.budgets, db.debts, db.repayments, db.recurring, db.accounts, db.transfers, db.messMembers, db.messMeals, db.messEntries, db.shopParties, db.shopEntries, db.shopProducts, db.shopAdjustments, db.messBudgets, db.settings], async () => {
+    await Promise.all([db.transactions.clear(), db.categories.clear(), db.budgets.clear(), db.debts.clear(), db.repayments.clear(), db.recurring.clear(), db.accounts.clear(), db.transfers.clear(), db.messMembers.clear(), db.messMeals.clear(), db.messEntries.clear(), db.shopParties.clear(), db.shopEntries.clear(), db.shopProducts.clear(), db.shopAdjustments.clear(), db.messBudgets.clear()]);
     await db.categories.bulkAdd(d.categories);
     // ডিফল্ট খাত (যেমন "অন্যান্য খরচ") ব্যাকআপে না থাকলেও যেন থাকে — নইলে AI/ফলব্যাক এমন খাতে লেখে যা নেই
     const have = new Set(d.categories.map((c) => c.id));
@@ -357,6 +369,7 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
     await db.shopProducts.bulkAdd(d.shopProducts);
     await db.shopEntries.bulkAdd(d.shopEntries);
     await db.shopAdjustments.bulkAdd(d.shopAdjustments);
+    await db.messBudgets.bulkAdd(d.messBudgets);
     await db.settings.bulkPut(d.settings);
   });
 }

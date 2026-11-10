@@ -114,6 +114,15 @@ export interface MessMember {
   updatedAt: number;
 }
 
+/** মেসের মাসিক বাজেট (বাজার + সাধারণ খরচ মিলিয়ে একটাই)। id = মাস ("YYYY-MM") */
+export interface MessBudget {
+  id: string;
+  month: string;
+  amount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** একজন সদস্যের একদিনের মিল; halves = আধা-মিল (২ = ১টি মিল)। শূন্য হলে সারিই রাখা হয় না */
 export interface MessMeal {
   id: string; // `${date}_${memberId}` — প্রতিদিন প্রতি সদস্যের একটিই সারি

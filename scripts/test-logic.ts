@@ -15,7 +15,7 @@ import { localAnswer } from "../src/lib/insights";
 import { dueOccurrences, defaultStartMonth, generateRecurring, occurrenceId, scheduledDate } from "../src/lib/recurring";
 import { PIN_RE, hashPin, makeSalt, normalizePin, verifyPin } from "../src/lib/pin";
 import { accountSummary } from "../src/lib/accounts";
-import { allocate, messSummary, mealId } from "../src/lib/mess";
+import { allocate, messSummary, mealId, messBudgetStatus, messCostBreakdown } from "../src/lib/mess";
 import { paidOf, creditOf, partyBalances, shopSummary, shopEntryValid } from "../src/lib/shop";
 import { parseAmountOrZero } from "../src/lib/money";
 import { parseQty, parseQtyOrZero, formatQty, lineTotal, stockSummary, MAX_QTY } from "../src/lib/products";
@@ -558,6 +558,55 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     delete old.data.shopParties;
     delete old.data.shopEntries;
     assert.deepEqual(validateBackupText(JSON.stringify(old)).data.shopEntries, []);
+    await eraseAllData();
+  });
+
+  console.log("মেসের বাজেট");
+  await ok("মেসের বাজেট: খরচ = বাজার + সাধারণ খরচ; সতর্কতা; দৈনিক সীমা; পূর্বাভাস", () => {
+    const mem = (id: string): MessMember => ({ id, name: id, active: true, createdAt: 1, updatedAt: 1 });
+    const ent = (o: Partial<MessEntry>): MessEntry => ({ id: newId(), kind: "bazaar", amount: 100, date: "2026-11-03", createdAt: 1, ...o });
+    const members = [mem("a"), mem("b"), mem("c"), mem("d")];
+    const entries = [ent({ amount: 600000 }), ent({ kind: "shared", amount: 800000, note: "ভাড়া" }), ent({ kind: "deposit", memberId: "a", amount: 2000000 })];
+    const sm = messSummary(members, [], entries, "2026-11");
+    const b = messBudgetStatus(sm, 2000000, "2026-11", "2026-11-10");
+    assert.equal(b.spent, 1400000);
+    assert.equal(b.remaining, 600000);
+    assert.equal(b.percent, 70);
+    assert.equal(b.level, "ok");
+    assert.equal(b.daysLeft, 21);
+    assert.equal(b.dailyAllowance, Math.floor(600000 / 21));
+    assert.equal(b.projected, 1400000 + 1200000);
+    assert.equal(b.willExceed, true);
+    assert.equal(b.perMember, 500000);
+    assert.equal(messBudgetStatus(sm, 1400000, "2026-11", "2026-11-10").level, "warn");
+    assert.equal(messBudgetStatus(sm, 1399999, "2026-11", "2026-11-10").level, "over");
+    assert.equal(messBudgetStatus(sm, 2000000, "2026-11", "2026-11-03").projectionReady, false);
+    assert.equal(messBudgetStatus(sm, 2000000, "2026-11", "2026-12-05").daysLeft, 0);
+    assert.equal(messBudgetStatus(sm, 100, "2028-02", "2028-02-01").daysInMonth, 29);
+  });
+  await ok("মেসের খরচ খাত অনুযায়ী (নিজের লেখা নামসহ)", () => {
+    const e = (o: Partial<MessEntry>): MessEntry => ({ id: newId(), kind: "shared", amount: 100, date: "2026-11-03", createdAt: 1, ...o });
+    const rows = messCostBreakdown([e({ amount: 800000, note: "বাড়ি ভাড়া" }), e({ amount: 120000, note: "বিদ্যুৎ" }), e({ amount: 30000, note: "বিদ্যুৎ " }), e({ kind: "bazaar", amount: 650000 }), e({ kind: "deposit", memberId: "a", amount: 9999999 })], "2026-11");
+    assert.deepEqual(rows.map((r) => [r.kind, r.label, r.amount]), [["shared", "বাড়ি ভাড়া", 800000], ["bazaar", null, 650000], ["shared", "বিদ্যুৎ", 150000]]);
+  });
+  await ok("মেসের বাজেট ব্যাকআপে যায়-ফেরে; পুরনো ব্যাকআপ চলে", async () => {
+    await eraseAllData();
+    const now = Date.now();
+    await db.messBudgets.bulkAdd([
+      { id: "2026-11", month: "2026-11", amount: 2000000, createdAt: now, updatedAt: now },
+      { id: "2026-10", month: "2026-10", amount: 1800000, createdAt: now, updatedAt: now },
+    ]);
+    const text9 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    assert.equal(await db.messBudgets.count(), 0);
+    await restoreBackup(validateBackupText(text9));
+    assert.equal((await db.messBudgets.get("2026-11"))?.amount, 2000000);
+    const bad = JSON.parse(text9);
+    bad.data.messBudgets[0].id = "2020-01";
+    assert.throws(() => validateBackupText(JSON.stringify(bad)), (e: unknown) => e instanceof BackupError);
+    const old = JSON.parse(text9);
+    delete old.data.messBudgets;
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.messBudgets, []);
     await eraseAllData();
   });
 

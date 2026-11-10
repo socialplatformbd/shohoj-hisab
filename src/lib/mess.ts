@@ -1,3 +1,4 @@
+import { endOfMonth } from "./dates";
 import type { MessEntry, MessMeal, MessMember } from "./types";
 
 /**
@@ -104,4 +105,87 @@ export function messSummary(members: MessMember[], meals: MessMeal[], entries: M
 /** একদিনের মিল-সারি আইডি (প্রতিদিন প্রতি সদস্যের একটিই) */
 export function mealId(date: string, memberId: string): string {
   return `${date}_${memberId}`;
+}
+
+export interface MessBudgetStatus {
+  budget: number;
+  /** মাসের মোট খরচ = বাজার + সাধারণ খরচ (জমা ধরা হয় না) */
+  spent: number;
+  remaining: number; // ঋণাত্মক হলে বাজেটের চেয়ে বেশি খরচ
+  percent: number;
+  level: "ok" | "warn" | "over";
+  daysInMonth: number;
+  /** মাসের বাকি দিন, আজসহ; অতীত মাসে ০ */
+  daysLeft: number;
+  /** আজ থেকে প্রতিদিন গড়ে সর্বোচ্চ কত খরচ করা যাবে (বাকি ÷ বাকি দিন); বাজেট শেষ বা মাস শেষ হলে ০ */
+  dailyAllowance: number;
+  /** পূর্বাভাস দেওয়ার মতো যথেষ্ট দিন (৫+) পার হয়েছে কিনা */
+  projectionReady: boolean;
+  /** এখনকার খরচ + বাজারের গড় দৈনিক গতিতে বাকি দিনের বাজার (সাধারণ খরচ বাড়ানো হয় না — ভাড়া/বিল লম্পসাম) */
+  projected: number;
+  /** এই গতিতে চললে বাজেট ছাড়াবে (এখনো ছাড়ায়নি) */
+  willExceed: boolean;
+  /** জনপ্রতি লক্ষ্য = বাজেট ÷ অংশগ্রহণকারী */
+  perMember: number;
+}
+
+const WARN_PERCENT = 80;
+
+/** মাসের বাজেটের অবস্থা; today = "YYYY-MM-DD" (ঢাকার আজ), month = "YYYY-MM" */
+export function messBudgetStatus(summary: MessSummary, budget: number, month: string, today: string): MessBudgetStatus {
+  const spent = summary.totalBazaar + summary.totalShared;
+  const daysInMonth = Number(endOfMonth(month + "-01").slice(8));
+  const nowMonth = today.slice(0, 7);
+  let elapsed: number;
+  if (month < nowMonth) elapsed = daysInMonth;
+  else if (month > nowMonth) elapsed = 0;
+  else elapsed = Math.min(daysInMonth, Number(today.slice(8)));
+  const daysLeft = month < nowMonth ? 0 : month > nowMonth ? daysInMonth : daysInMonth - elapsed + 1;
+  const remaining = budget - spent;
+  const percent = budget > 0 ? Math.floor((spent * 100) / budget) : 0;
+  const level: MessBudgetStatus["level"] = spent > budget ? "over" : percent >= WARN_PERCENT ? "warn" : "ok";
+  const projectionReady = month === nowMonth && elapsed >= 5 && elapsed < daysInMonth;
+  const projected = projectionReady ? spent + Math.round((summary.totalBazaar / elapsed) * (daysInMonth - elapsed)) : spent;
+  const people = summary.rows.length;
+  return {
+    budget,
+    spent,
+    remaining,
+    percent,
+    level,
+    daysInMonth,
+    daysLeft,
+    dailyAllowance: remaining > 0 && daysLeft > 0 ? Math.floor(remaining / daysLeft) : 0,
+    projectionReady,
+    projected,
+    willExceed: projectionReady && spent <= budget && projected > budget,
+    perMember: people > 0 ? Math.round(budget / people) : 0,
+  };
+}
+
+export interface CostRow {
+  kind: "bazaar" | "shared";
+  /** সাধারণ খরচের নাম (নিজের লেখা বা বাছাই করা); না থাকলে null */
+  label: string | null;
+  amount: number;
+}
+
+/** মাসের খরচ খাত অনুযায়ী: বাজার একটি সারি, সাধারণ খরচ নাম ধরে (ছোট/বড় হাতের পার্থক্য ছাড়া) গোছানো; বড় অঙ্ক আগে */
+export function messCostBreakdown(entries: MessEntry[], month: string): CostRow[] {
+  let bazaar = 0;
+  const groups = new Map<string, CostRow>();
+  for (const e of entries) {
+    if (e.date.slice(0, 7) !== month) continue;
+    if (e.kind === "bazaar") bazaar += e.amount;
+    else if (e.kind === "shared") {
+      const label = e.note?.trim() || null;
+      const key = label ? label.toLowerCase() : "";
+      const row = groups.get(key);
+      if (row) row.amount += e.amount;
+      else groups.set(key, { kind: "shared", label, amount: e.amount });
+    }
+  }
+  const rows: CostRow[] = [...groups.values()];
+  if (bazaar > 0) rows.push({ kind: "bazaar", label: null, amount: bazaar });
+  return rows.sort((a, b) => b.amount - a.amount);
 }
