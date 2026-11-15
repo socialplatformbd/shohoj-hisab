@@ -22,6 +22,24 @@ export default function MessMealsPage() {
   const people: MessMember[] = data.messMembers.filter((m) => m.active || dayMeals.has(m.id)).sort((a, b) => a.createdAt - b.createdAt);
   const totalHalves = people.reduce((s, m) => s + (dayMeals.get(m.id) ?? 0), 0);
 
+  /** আগের দিনের মিল আজকের জন্য কপি — যাদের আজ আগে থেকে মিল লেখা আছে তাদের বদলায় না; শুধু সক্রিয় সদস্য */
+  async function copyPrevDay() {
+    const prevMeals = data.messMeals.filter((m) => m.date === addDays(day, -1));
+    if (prevMeals.length === 0) {
+      toast(t("messCopyNone"), "warn");
+      return;
+    }
+    const activeIds = new Set(data.messMembers.filter((m) => m.active).map((m) => m.id));
+    const todo = prevMeals.filter((m) => activeIds.has(m.memberId) && !dayMeals.has(m.memberId));
+    try {
+      const now = Date.now();
+      await db.messMeals.bulkPut(todo.map((m) => ({ id: mealId(day, m.memberId), date: day, memberId: m.memberId, halves: m.halves, updatedAt: now })));
+      toast(t("messCopyDone", { n: num(todo.length) }));
+    } catch {
+      toast(t("dbError"), "error");
+    }
+  }
+
   async function setHalves(m: MessMember, halves: number) {
     const h = Math.min(MAX_HALVES, Math.max(0, halves));
     try {
@@ -57,7 +75,10 @@ export default function MessMealsPage() {
       </div>
 
       <p className="mb-1 text-sm font-medium">{t("messMealsDay", { n: num(totalHalves / 2) })}</p>
-      <p className="mb-4 text-xs text-muted">{t("messMealsHint")}</p>
+      <p className="mb-2 text-xs text-muted">{t("messMealsHint")}</p>
+      <button className="btn btn-ghost mb-4 w-full" onClick={() => void copyPrevDay()}>
+        {t("messCopyPrevDay")}
+      </button>
 
       {people.length === 0 ? (
         <div className="card">

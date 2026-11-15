@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { BN_MONTHS, BN_MONTHS_SHORT, BN_WEEKDAYS, EN_MONTHS, EN_MONTHS_SHORT, EN_WEEKDAYS, normalizeStartDay, weekdayIndex } from "@/lib/dates";
 import { db, setSetting } from "@/lib/db";
 import type { DataBundle } from "@/lib/insights";
-import type { Account, AppMode, MessBudget, MessEntry, MessMeal, MessMember, ShopAdjustment, ShopEntry, ShopParty, ShopProduct, Transfer } from "@/lib/types";
+import type { Account, AppMode, Goal, MessBudget, MessEntry, MessMeal, MessMember, ShopAdjustment, ShopEntry, ShopParty, ShopProduct, Transfer } from "@/lib/types";
 import { translate, type TKey } from "@/lib/i18n";
 import { applyDigits, formatMoney } from "@/lib/money";
 import type { Category, Digits, Lang, SettingRow, Theme } from "@/lib/types";
@@ -25,6 +25,18 @@ export interface Settings {
   monthStartDay: number;
   /** চলতি মোড: ব্যক্তিগত (ডিফল্ট), মেস বা দোকান */
   mode: AppMode;
+  /** মেস: আগের মাসের জের পরের মাসে ধরা হবে কিনা */
+  messCarry: boolean;
+  /** মেস: এই মাস ("YYYY-MM") পর্যন্ত সব মেটানো হয়েছে — জের এর পর থেকে শুরু; "" = নেই */
+  messSettledThrough: string;
+  /** দোকান: লাভের হিসাব — simple (বিক্রি − ক্রয় − খরচ, ডিফল্ট) বা avg (গড় ক্রয়দামে) */
+  shopProfitMode: "simple" | "avg";
+  /** বিল/কিস্তির রিমাইন্ডার নোটিফিকেশন (অ্যাপ খুললে) */
+  billReminders: boolean;
+  /** AI-কে খরচের নিজের লেখা বিবরণ পাঠানো হবে কিনা (ডিফল্ট হ্যাঁ) */
+  aiSendDetails: boolean;
+  /** সার্ভারে AI_ACCESS_CODE দেওয়া থাকলে এই কোড লাগে (শুধু এই ডিভাইসে থাকে, ব্যাকআপে যায় না) */
+  aiAccessCode: string;
 }
 
 type ToastKind = "success" | "error" | "warn" | "info";
@@ -68,8 +80,8 @@ export function useApp(): AppCtx {
 }
 
 /** অ্যাপের সব ডেটা (AI-র DataBundle + অ্যাকাউন্ট ও ট্রান্সফার) */
-export type AppData = DataBundle & { accounts: Account[]; transfers: Transfer[]; messMembers: MessMember[]; messMeals: MessMeal[]; messEntries: MessEntry[]; shopParties: ShopParty[]; shopEntries: ShopEntry[]; shopProducts: ShopProduct[]; shopAdjustments: ShopAdjustment[]; messBudgets: MessBudget[] };
-const EMPTY: AppData = { transactions: [], categories: [], budgets: [], debts: [], repayments: [], accounts: [], transfers: [], messMembers: [], messMeals: [], messEntries: [], shopParties: [], shopEntries: [], shopProducts: [], shopAdjustments: [], messBudgets: [] };
+export type AppData = DataBundle & { accounts: Account[]; transfers: Transfer[]; messMembers: MessMember[]; messMeals: MessMeal[]; messEntries: MessEntry[]; shopParties: ShopParty[]; shopEntries: ShopEntry[]; shopProducts: ShopProduct[]; shopAdjustments: ShopAdjustment[]; messBudgets: MessBudget[]; goals: Goal[] };
+const EMPTY: AppData = { transactions: [], categories: [], budgets: [], debts: [], repayments: [], accounts: [], transfers: [], messMembers: [], messMeals: [], messEntries: [], shopParties: [], shopEntries: [], shopProducts: [], shopAdjustments: [], messBudgets: [], goals: [] };
 
 const TOAST_ICON = { success: CheckCircle2, error: XCircle, warn: AlertTriangle, info: Info };
 const TOAST_STYLE: Record<ToastKind, string> = {
@@ -91,7 +103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dbError, setDbError] = useState(false);
   const settingRows = useLiveQuery(() => db.settings.toArray(), []);
   const data = useLiveQuery(async () => {
-    const [transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments, messBudgets] = await Promise.all([
+    const [transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments, messBudgets, goals] = await Promise.all([
       db.transactions.toArray(),
       db.categories.toArray(),
       db.budgets.toArray(),
@@ -107,8 +119,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       db.shopProducts.toArray(),
       db.shopAdjustments.toArray(),
       db.messBudgets.toArray(),
+      db.goals.toArray(),
     ]);
-    return { transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments, messBudgets } satisfies AppData;
+    return { transactions, categories, budgets, debts, repayments, accounts, transfers, messMembers, messMeals, messEntries, shopParties, shopEntries, shopProducts, shopAdjustments, messBudgets, goals } satisfies AppData;
   }, []);
 
   useEffect(() => {
@@ -129,6 +142,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lastBackupAt: typeof m.get("lastBackupAt") === "number" ? (m.get("lastBackupAt") as number) : null,
       monthStartDay: normalizeStartDay(m.get("monthStartDay")),
       mode: m.get("mode") === "mess" ? "mess" : m.get("mode") === "shop" ? "shop" : "personal",
+      messCarry: m.get("messCarry") === true,
+      messSettledThrough: typeof m.get("messSettledThrough") === "string" ? (m.get("messSettledThrough") as string) : "",
+      shopProfitMode: m.get("shopProfitMode") === "avg" ? "avg" : "simple",
+      billReminders: m.get("billReminders") === true,
+      aiSendDetails: m.get("aiSendDetails") !== false,
+      aiAccessCode: typeof m.get("aiAccessCode") === "string" ? (m.get("aiAccessCode") as string) : "",
     };
   }, [settingRows]);
 

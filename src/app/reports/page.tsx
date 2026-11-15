@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
 import { TransactionDetailSheet, TransactionRow } from "@/components/TransactionParts";
 import { EmptyState, IncomeExpenseChart, PageHeader } from "@/components/ui";
+import { PrintBlock, PrintButton, PrintDoc } from "@/components/PrintDoc";
 import { categoryBreakdown, dailySeries, filterRange, monthlySeries, sumTx } from "@/lib/calc";
 import { saveBlob } from "@/lib/backup";
 import { transactionsToCsv } from "@/lib/csv";
@@ -79,15 +80,43 @@ export default function ReportsPage() {
 
   if (!dataReady) return null;
 
+  const printBlocks: PrintBlock[] = [
+    {
+      type: "kv",
+      heading: t("printTotals"),
+      rows: [
+        [t("typeIncome"), money(totals.income)],
+        [t("typeExpense"), money(totals.expense)],
+        [t("typeSaving"), money(totals.saving)],
+        [t("typeWithdraw"), money(totals.withdraw)],
+        [t("currentBalance"), money(totals.balance)],
+      ],
+    },
+    ...(cats.length > 0
+      ? [{ type: "table" as const, heading: t("printByCategory"), head: [t("category"), t("amount")], rows: cats.map((c) => [catName(data.categories.find((x) => x.id === c.categoryId)), money(c.total)]), right: [1] }]
+      : []),
+    {
+      type: "table",
+      heading: t("printTransactions"),
+      head: [t("date"), t("category"), t("description"), t("amount")],
+      rows: list.map((x) => [date(x.date), catName(data.categories.find((c) => c.id === x.categoryId)), x.description ?? "", `${x.type === "income" || x.type === "withdraw" ? "+" : "−"}${money(x.amount)}`]),
+      right: [3],
+    },
+  ];
+
   return (
     <div className="space-y-4">
+      <PrintDoc title={t("printPersonalTitle")} subtitle={periodLabel} blocks={printBlocks} />
       <PageHeader
         title={t("reports")}
         right={
-          <button className="btn btn-ghost btn-sm" onClick={exportCsv}>
-            <Download className="h-4 w-4" />
-            {t("exportCsv")}
-          </button>
+          <div className="flex gap-2">
+            <PrintButton />
+            <button className="btn btn-ghost btn-sm" onClick={exportCsv}>
+              <Download className="h-4 w-4" />
+              {t("exportCsv")}
+            </button>
+          </div>
         }
       />
 

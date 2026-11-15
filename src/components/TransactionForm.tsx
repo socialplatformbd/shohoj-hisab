@@ -55,6 +55,7 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
   const [description, setDescription] = useState(editing?.description ?? "");
   const [paymentMethod, setPaymentMethod] = useState(editing?.paymentMethod ?? "");
   const [reimbursable, setReimbursable] = useState(editing?.reimbursable ?? initial.reimbursable ?? false);
+  const [goalId, setGoalId] = useState(editing?.goalId ?? "");
   const [accountId, setAccountId] = useState(() => {
     if (editing) return editing.accountId ?? "";
     // নতুন লেনদেনে সর্বশেষ ব্যবহৃত অ্যাকাউন্টটি আগে থেকে বসানো থাকে
@@ -107,6 +108,7 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
         description: description.trim() || undefined,
         paymentMethod: paymentMethod || account?.kind || undefined,
         accountId: account?.id,
+        goalId: (type === "saving" || type === "withdraw") && data.goals.some((g) => g.id === goalId) ? goalId : undefined,
         reimbursable: type === "expense" && reimbursable ? true : undefined,
         reimbursedAt: type === "expense" && reimbursable ? editing?.reimbursedAt : undefined,
         reimbursementTxId: type === "expense" && reimbursable ? editing?.reimbursementTxId : undefined,
@@ -200,6 +202,19 @@ function TransactionSheet({ initial, onClose }: { initial: OpenOpts; onClose: ()
             <input type="checkbox" className="h-5 w-5" checked={reimbursable} disabled={!!editing?.reimbursedAt} onChange={(e) => setReimbursable(e.target.checked)} />
             <span className="font-medium">{t("reimbCheckbox")}</span>
           </label>
+        )}
+
+        {(type === "saving" || type === "withdraw") && data.goals.length > 0 && (
+          <Field label={t("goalField")} optional>
+            <select className="input" value={goalId} onChange={(e) => setGoalId(e.target.value)}>
+              <option value="">—</option>
+              {data.goals.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </Field>
         )}
 
         {data.accounts.length > 0 && (

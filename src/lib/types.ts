@@ -17,7 +17,18 @@ export interface Transaction {
   reimbursable?: boolean; // অফিস/অন্যের জন্য করা খরচ — ফেরত পাওয়ার কথা
   reimbursedAt?: string; // ফেরত পাওয়ার তারিখ (পেয়ে গেলে)
   reimbursementTxId?: string; // ফেরতের আয়-এন্ট্রির আইডি
+  goalId?: string; // সঞ্চয়/উত্তোলন কোন লক্ষ্যের জন্য (ঐচ্ছিক)
   note?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** সঞ্চয়ের লক্ষ্য (যেমন "বাইক ৮০,০০০")। জমার পরিমাণ লেনদেন থেকে হিসাব হয় (goalId দেওয়া সঞ্চয় − উত্তোলন) */
+export interface Goal {
+  id: string;
+  name: string;
+  target: number;
+  deadline?: string; // ঐচ্ছিক সময়সীমা (YYYY-MM-DD)
   createdAt: number;
   updatedAt: number;
 }

@@ -1,4 +1,4 @@
-import { endOfMonth } from "./dates";
+import { addMonths, endOfMonth, monthsBetween } from "./dates";
 import type { MessEntry, MessMeal, MessMember } from "./types";
 
 /**
@@ -33,7 +33,8 @@ export interface MessRow {
   shared: number; // সাধারণ খরচের ভাগ
   deposits: number; // জমা দিয়েছেন
   paid: number; // নিজের পকেট থেকে বাজার/সাধারণ খরচ করেছেন
-  balance: number; // জমা + পকেট থেকে দেওয়া − মিলের খরচ − সাধারণ ভাগ। (+) ফেরত পাবেন, (−) দিতে হবে
+  carry: number; // আগের মাসের জের (জের চালু থাকলে; (+) পাওনা, (−) দেনা)
+  balance: number; // জের + জমা + পকেট থেকে দেওয়া − মিলের খরচ − সাধারণ ভাগ। (+) ফেরত পাবেন, (−) দিতে হবে
 }
 
 export interface MessSummary {
@@ -55,7 +56,7 @@ const inMonth = (date: string, month: string) => date.slice(0, 7) === month;
  * অংশগ্রহণকারী = সক্রিয় সদস্য + ওই মাসে মিল/লেনদেন আছে এমন সদস্য (নিষ্ক্রিয় হলেও)।
  * মিল-রেট = মোট বাজার ÷ মোট মিল; সাধারণ খরচ সব অংশগ্রহণকারীর মধ্যে সমান।
  */
-export function messSummary(members: MessMember[], meals: MessMeal[], entries: MessEntry[], month: string): MessSummary {
+export function messSummary(members: MessMember[], meals: MessMeal[], entries: MessEntry[], month: string, carryIn?: Map<string, number>): MessSummary {
   const es = entries.filter((e) => inMonth(e.date, month));
   const halvesBy = new Map<string, number>();
   for (const m of meals) if (inMonth(m.date, month)) halvesBy.set(m.memberId, (halvesBy.get(m.memberId) ?? 0) + m.halves);
@@ -64,6 +65,8 @@ export function messSummary(members: MessMember[], meals: MessMeal[], entries: M
     if (e.memberId) involved.add(e.memberId);
     if (e.kind === "shared") e.splitWith?.forEach((id) => involved.add(id));
   }
+  // আগের মাসের জের থাকলে সেই সদস্যও এ মাসের হিসাবে থাকেন (নিষ্ক্রিয় হলেও), নইলে তার বাকি হারিয়ে যেত
+  for (const [id, v] of carryIn ?? []) if (v !== 0) involved.add(id);
   const people = members.filter((m) => m.active || involved.has(m.id));
 
   const totalBazaar = es.filter((e) => e.kind === "bazaar").reduce((s, e) => s + e.amount, 0);
@@ -86,7 +89,8 @@ export function messSummary(members: MessMember[], meals: MessMeal[], entries: M
     const paid = es.filter((e) => e.kind !== "deposit" && e.memberId === member.id).reduce((s, e) => s + e.amount, 0);
     const mealCost = mealCosts[i];
     const shared = sharedShares[i];
-    return { member, halves: halves[i], mealCost, shared, deposits, paid, balance: deposits + paid - mealCost - shared };
+    const carry = carryIn?.get(member.id) ?? 0;
+    return { member, halves: halves[i], mealCost, shared, deposits, paid, carry, balance: carry + deposits + paid - mealCost - shared };
   });
 
   return {
@@ -188,4 +192,24 @@ export function messCostBreakdown(entries: MessEntry[], month: string): CostRow[
   const rows: CostRow[] = [...groups.values()];
   if (bazaar > 0) rows.push({ kind: "bazaar", label: null, amount: bazaar });
   return rows.sort((a, b) => b.amount - a.amount);
+}
+
+/**
+ * month মাসে ঢোকার আগের জের (সদস্য → পাওনা(+)/দেনা(−)): প্রথম হিসাব-থাকা মাস থেকে ধরে ধরে চলে।
+ * settledThrough ("YYYY-MM") দেওয়া থাকলে ওই মাস পর্যন্ত সব মিটে গেছে ধরে জের শূন্য থেকে শুরু হয়।
+ */
+export function messCarryChain(members: MessMember[], meals: MessMeal[], entries: MessEntry[], month: string, settledThrough?: string): Map<string, number> {
+  const months: string[] = [];
+  for (const m of meals) months.push(m.date.slice(0, 7));
+  for (const e of entries) months.push(e.date.slice(0, 7));
+  if (months.length === 0) return new Map();
+  const first = months.reduce((a, b) => (a < b ? a : b));
+  let carry = new Map<string, number>();
+  const span = Math.min(120, monthsBetween(first, month)); // সর্বোচ্চ ১০ বছর পিছনে
+  for (let i = span; i >= 1; i--) {
+    const m = addMonths(month, -i);
+    const s = messSummary(members, meals, entries, m, carry);
+    carry = settledThrough && m <= settledThrough ? new Map() : new Map(s.rows.filter((r) => r.balance !== 0).map((r) => [r.member.id, r.balance]));
+  }
+  return carry;
 }

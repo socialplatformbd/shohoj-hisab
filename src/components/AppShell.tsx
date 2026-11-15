@@ -10,10 +10,12 @@ import { Logo } from "./Logo";
 import { useTxForm } from "./TransactionForm";
 import { Spinner } from "./ui";
 import { todayDhaka } from "@/lib/dates";
+import { db } from "@/lib/db";
 import { generateRecurring } from "@/lib/recurring";
+import { upcomingReminders } from "@/lib/reminders";
 import { Welcome } from "./Welcome";
 
-const MORE_PATHS = ["/more", "/budgets", "/debts", "/accounts", "/recurring", "/reimbursements", "/settings"];
+const MORE_PATHS = ["/more", "/budgets", "/debts", "/accounts", "/recurring", "/reimbursements", "/goals", "/settings"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ready, dbError, settings, t, online, toast } = useApp();
@@ -56,6 +58,34 @@ export function AppShell({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", onVis);
     };
   }, [ready, welcomeDone, toast, t]);
+
+  // আসন্ন বিল/কিস্তি/ঋণের নোটিফিকেশন: অ্যাপ খুললে দিনে একবার (অ্যাপ বন্ধ থাকলে আসে না — সার্ভার নেই)
+  const remindersOn = settings.billReminders;
+  useEffect(() => {
+    if (!ready || !welcomeDone || !remindersOn) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    let cancelled = false;
+    (async () => {
+      const today = todayDhaka();
+      const last = await db.settings.get("lastReminderDay");
+      if (cancelled || last?.value === today) return;
+      const [rec, debts, reps] = await Promise.all([db.recurring.toArray(), db.debts.toArray(), db.repayments.toArray()]);
+      const n = upcomingReminders(rec, debts, reps, today, 3).length;
+      if (n === 0 || cancelled) return;
+      await db.settings.put({ key: "lastReminderDay", value: today });
+      const body = t("remindNotifBody", { n });
+      try {
+        const reg = await navigator.serviceWorker?.getRegistration();
+        if (reg) await reg.showNotification(t("appName"), { body, icon: "/icon-192.png" });
+        else new Notification(t("appName"), { body, icon: "/icon-192.png" });
+      } catch {
+        /* কিছু ব্রাউজার সরাসরি Notification তৈরি করতে দেয় না — তখন চুপচাপ বাদ */
+      }
+    })().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, welcomeDone, remindersOn, t]);
 
   // মোড অনুযায়ী পেজ: মেস মোডে মেসের পেজ (+ আরও/সেটিংস), ব্যক্তিগত মোডে মেসের পেজ নয়
   const mode = settings.mode;

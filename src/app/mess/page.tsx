@@ -4,18 +4,25 @@ import { ChevronLeft, ChevronRight, Share2, Users } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
+import { PrintBlock, PrintButton, PrintDoc } from "@/components/PrintDoc";
 import { EmptyState, Field, PageHeader, ProgressBar, Sheet } from "@/components/ui";
 import { addMonths, monthKey, todayDhaka } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { formatPlainPaisa, parseAmountToPaisa } from "@/lib/money";
-import { messBudgetStatus, messCostBreakdown, messSummary } from "@/lib/mess";
+import { messBudgetStatus, messCarryChain, messCostBreakdown, messSummary, type MessRow } from "@/lib/mess";
 import type { MessBudget } from "@/lib/types";
 
 export default function MessHomePage() {
-  const { t, data, money, num, monthLabel, toast, confirm, dataReady } = useApp();
+  const { t, data, money, num, monthLabel, settings, updateSetting, toast, confirm, dataReady } = useApp();
   const [month, setMonth] = useState(monthKey(todayDhaka()));
   const [budgetOpen, setBudgetOpen] = useState(false);
-  const s = useMemo(() => messSummary(data.messMembers, data.messMeals, data.messEntries, month), [data.messMembers, data.messMeals, data.messEntries, month]);
+  const carryOn = settings.messCarry;
+  const settledThrough = settings.messSettledThrough;
+  const s = useMemo(() => {
+    // জের চালু থাকলে আগের মাসগুলোর ব্যালেন্স ধরে ধরে আসে; "মেটানো" চিহ্ন পর্যন্ত গেলে শূন্য থেকে শুরু
+    const carry = carryOn ? messCarryChain(data.messMembers, data.messMeals, data.messEntries, month, settledThrough || undefined) : undefined;
+    return messSummary(data.messMembers, data.messMeals, data.messEntries, month, carry);
+  }, [data.messMembers, data.messMeals, data.messEntries, month, carryOn, settledThrough]);
 
   if (!dataReady) return null;
 
@@ -34,6 +41,72 @@ export default function MessHomePage() {
       toast(t("dbError"), "error");
     }
   }
+
+  async function sendText(text: string) {
+    try {
+      if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+        await navigator.share({ text });
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      toast(t("messCopied"));
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      toast(t("dbError"), "error");
+    }
+  }
+
+  /** একজন সদস্যের নিজের হিসাব — আলাদা করে তাকে পাঠানোর জন্য */
+  function shareMember(r: MessRow) {
+    const state = r.balance > 0 ? `${t("messGets")}: ${money(r.balance)}` : r.balance < 0 ? `${t("messOwes")}: ${money(-r.balance)}` : t("messSettled");
+    void sendText(
+      [
+        `${t("messShareHeading", { m: monthLabel(month) })} — ${r.member.name}`,
+        `${t("messMealsLabel")}: ${num(r.halves / 2)} (${t("messMealRate")}: ${money(s.mealRate)})`,
+        `${t("messMealCost")}: ${money(r.mealCost)}`,
+        `${t("messSharedShare")}: ${money(r.shared)}`,
+        ...(r.carry !== 0 ? [`${t("messCarryRow")}: ${money(r.carry)}`] : []),
+        `${t("messDeposited")}: ${money(r.deposits)}`,
+        ...(r.paid > 0 ? [`${t("messPaidPocket")}: ${money(r.paid)}`] : []),
+        state,
+      ].join("\n"),
+    );
+  }
+
+  async function settleThisMonth() {
+    if (!(await confirm({ message: t("messSettleConfirm", { m: monthLabel(month) }) }))) return;
+    try {
+      await updateSetting("messSettledThrough", month);
+    } catch {
+      toast(t("dbError"), "error");
+    }
+  }
+
+  const printBlocks: PrintBlock[] = [
+    {
+      type: "kv",
+      heading: t("printTotals"),
+      rows: [
+        ...(st ? ([[t("messBudgetTitle"), `${money(st.budget)} • ${t("messBudgetSpent")}: ${money(st.spent)} • ${t("messBudgetRemaining")}: ${money(st.remaining)}`]] as [string, string][]) : []),
+        [t("messTotalBazaar"), money(s.totalBazaar)],
+        [t("messTotalMeals"), num(s.totalHalves / 2)],
+        [t("messMealRate"), money(s.mealRate)],
+        [t("messTotalShared"), money(s.totalShared)],
+        [t("messTotalDeposits"), money(s.totalDeposits)],
+        [t("messPool"), money(s.pool)],
+      ],
+    },
+    {
+      type: "table",
+      heading: t("printMessMembers"),
+      head: [t("messMemberName"), t("messMealsLabel"), t("messMealCost"), t("messSharedShare"), ...(carryOn ? [t("messCarryRow")] : []), t("messDeposited"), t("messGets") + " / " + t("messOwes")],
+      rows: s.rows.map((r) => [r.member.name, num(r.halves / 2), money(r.mealCost), money(r.shared), ...(carryOn ? [money(r.carry)] : []), money(r.deposits), money(r.balance)]),
+      right: carryOn ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5],
+    },
+    ...(costs.length > 0
+      ? [{ type: "table" as const, heading: t("messCostBreakdown"), head: [t("category"), t("amount")], rows: costs.map((c) => [c.kind === "bazaar" ? t("messKindBazaar") : (c.label ?? t("messCostOther")), money(c.amount)]), right: [1] }]
+      : []),
+  ];
 
   async function share() {
     const lines = [
@@ -74,7 +147,8 @@ export default function MessHomePage() {
 
   return (
     <div>
-      <PageHeader title={t("messTitle")} />
+      <PrintDoc title={t("messShareHeading", { m: monthLabel(month) })} blocks={printBlocks} />
+      <PageHeader title={t("messTitle")} right={<PrintButton />} />
 
       <div className="mb-4 flex items-center gap-2">
         <button className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-soft" onClick={() => setMonth(addMonths(month, -1))} aria-label="−1">
@@ -197,6 +271,12 @@ export default function MessHomePage() {
                   </div>
                 </div>
                 <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted">
+                  {carryOn && r.carry !== 0 && (
+                    <div className="col-span-2 flex justify-between">
+                      <dt>{t("messCarryRow")}</dt>
+                      <dd>{money(r.carry)}</dd>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <dt>{t("messMealsLabel")}</dt>
                     <dd>{num(r.halves / 2)}</dd>
@@ -229,9 +309,35 @@ export default function MessHomePage() {
                     </div>
                   )}
                 </dl>
+                <button className="mt-2 min-h-11 text-xs font-semibold underline" onClick={() => shareMember(r)}>
+                  {t("messMemberShare")}
+                </button>
               </li>
             ))}
           </ul>
+
+          <section className="card mt-4 space-y-2">
+            <label className="flex min-h-11 items-center gap-3">
+              <input type="checkbox" className="h-5 w-5" checked={carryOn} onChange={(e) => void updateSetting("messCarry", e.target.checked)} />
+              <span className="font-medium">{t("messCarrySetting")}</span>
+            </label>
+            <p className="text-xs text-muted">{t("messCarryHint")}</p>
+            {carryOn && (
+              <div className="space-y-2">
+                {settledThrough && <p className="text-sm font-medium">{t("messSettleDone", { m: monthLabel(settledThrough) })}</p>}
+                <div className="flex flex-wrap gap-2">
+                  <button className="btn btn-ghost" onClick={() => void settleThisMonth()}>
+                    {t("messSettle")}
+                  </button>
+                  {settledThrough && (
+                    <button className="btn btn-ghost" onClick={() => void updateSetting("messSettledThrough", "")}>
+                      {t("messSettleClear")}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
 
           <button className="btn btn-ghost mt-4 w-full" onClick={() => void share()}>
             <Share2 className="h-5 w-5" />

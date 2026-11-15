@@ -17,6 +17,7 @@ export default function MessEntriesPage() {
   const { t, data, money, date, monthLabel, toast, confirm, dataReady } = useApp();
   const [month, setMonth] = useState(monthKey(todayDhaka()));
   const [filter, setFilter] = useState<Filter>("all");
+  const [q, setQ] = useState("");
   const [editing, setEditing] = useState<{ entry?: MessEntry } | null>(null);
 
   const nameOf = useMemo(() => new Map(data.messMembers.map((m) => [m.id, m.name])), [data.messMembers]);
@@ -24,8 +25,14 @@ export default function MessEntriesPage() {
     () =>
       data.messEntries
         .filter((e) => e.date.slice(0, 7) === month && (filter === "all" || e.kind === filter))
+        .filter((e) => {
+          const needle = q.trim().toLowerCase();
+          if (!needle) return true;
+          const who = e.memberId ? (nameOf.get(e.memberId) ?? "") : "";
+          return `${e.note ?? ""} ${who}`.toLowerCase().includes(needle);
+        })
         .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt)),
-    [data.messEntries, month, filter],
+    [data.messEntries, month, filter, q, nameOf],
   );
   const total = list.reduce((s, e) => s + e.amount, 0);
 
@@ -70,6 +77,8 @@ export default function MessEntriesPage() {
           </button>
         ))}
       </div>
+
+      <input className="input mb-3" type="search" placeholder={t("searchEntries")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("searchEntries")} />
 
       {list.length > 0 && <p className="mb-3 text-sm font-medium">{money(total)}</p>}
 

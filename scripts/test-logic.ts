@@ -11,16 +11,25 @@ import { buildBackup, validateBackupText, restoreBackup, BackupError, encryptedB
 import { DecryptError, decryptText, encryptText, isEncryptedBackupText } from "../src/lib/cryptoBackup";
 import { transactionsToCsv, parseTransactionsCsv } from "../src/lib/csv";
 import { ExtractResponseSchema } from "../src/lib/aiSchema";
-import { localAnswer } from "../src/lib/insights";
+import { localAnswer, buildFacts } from "../src/lib/insights";
+import { goalProgress } from "../src/lib/goals";
+import { upcomingReminders, nextRecurringDate } from "../src/lib/reminders";
+import { messCarryChain } from "../src/lib/mess";
+import { costBasis, cogsOf, shopProfitAvg, topProducts, oldestDue, dueAgeDays } from "../src/lib/shopAnalytics";
 import { dueOccurrences, defaultStartMonth, generateRecurring, occurrenceId, scheduledDate } from "../src/lib/recurring";
 import { PIN_RE, hashPin, makeSalt, normalizePin, verifyPin } from "../src/lib/pin";
 import { accountSummary } from "../src/lib/accounts";
 import { allocate, messSummary, mealId, messBudgetStatus, messCostBreakdown } from "../src/lib/mess";
 import { paidOf, creditOf, partyBalances, shopSummary, shopEntryValid } from "../src/lib/shop";
 import { parseAmountOrZero } from "../src/lib/money";
+import { goalProgress } from "../src/lib/goals";
+import { upcomingReminders, nextRecurringDate } from "../src/lib/reminders";
+import { messCarryChain } from "../src/lib/mess";
+import { shopProfitAvg, costBasis, cogsOf, topProducts, oldestDue, dueAgeDays } from "../src/lib/shopAnalytics";
+import { buildFacts } from "../src/lib/insights";
 import { parseQty, parseQtyOrZero, formatQty, lineTotal, stockSummary, MAX_QTY } from "../src/lib/products";
 import { markReceived, undoReceived, isPending, isReceived, pendingTotal, reimbursementIncomeId, REIMBURSEMENT_CATEGORY_ID } from "../src/lib/reimburse";
-import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty, ShopProduct, ShopAdjustment } from "../src/lib/types";
+import type { Transaction, Debt, Repayment, Budget, Recurring, Account, Transfer, MessEntry, MessMeal, MessMember, ShopEntry, ShopParty, ShopProduct, ShopAdjustment, Goal } from "../src/lib/types";
 
 let n = 0;
 const ok = (name: string, fn: () => void | Promise<void>) =>
@@ -561,6 +570,92 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     await eraseAllData();
   });
 
+  console.log("সঞ্চয়ের লক্ষ্য, রিমাইন্ডার, জের, গড় ক্রয়দাম");
+  await ok("সঞ্চয়ের লক্ষ্য: জমা − তোলা, শতাংশ, প্রতি মাসে কত লাগবে", () => {
+    const G = (o: Partial<Goal> = {}): Goal => ({ id: "g1", name: "বাইক", target: 8000000, createdAt: 1, updatedAt: 1, ...o });
+    const txs = [tx({ type: "saving", amount: 2000000, goalId: "g1" }), tx({ type: "saving", amount: 500000, goalId: "g1" }), tx({ type: "withdraw", amount: 300000, goalId: "g1" }), tx({ type: "saving", amount: 999, goalId: "other" }), tx({ type: "expense", amount: 5000, goalId: "g1" })];
+    let p = goalProgress(G(), txs, "2026-11-10");
+    assert.equal(p.saved, 2200000);
+    assert.equal(p.percent, 27);
+    assert.equal(p.monthsLeft, null);
+    p = goalProgress(G({ deadline: "2027-04-30" }), txs, "2026-11-10");
+    assert.equal(p.monthsLeft, 6);
+    assert.equal(p.neededPerMonth, Math.ceil(5800000 / 6));
+    assert.equal(goalProgress(G({ deadline: "2026-10-01" }), txs, "2026-11-10").overdue, true);
+    assert.equal(goalProgress(G({ target: 2200000 }), txs, "2026-11-10").done, true);
+    assert.equal(goalProgress(G(), [tx({ type: "withdraw", amount: 5, goalId: "g1" })], "2026-11-10").saved, 0);
+  });
+  await ok("রিমাইন্ডার: আসন্ন বিল/কিস্তি ও ঋণ (আয় বাদ, শোধ-হওয়া বাদ, মেয়াদ-পারও আসে)", () => {
+    const R = (o: Partial<Recurring>): Recurring => ({ id: "r1", type: "expense", amount: 800000, categoryId: "cat_housing", description: "ভাড়া", dayOfMonth: 5, startMonth: "2026-05", active: true, createdAt: 0, updatedAt: 0, ...o });
+    assert.equal(nextRecurringDate(R({}), "2026-11-03"), "2026-11-05");
+    assert.equal(nextRecurringDate(R({}), "2026-11-06"), "2026-12-05");
+    assert.equal(nextRecurringDate(R({ lastMonth: "2026-11" }), "2026-11-03"), "2026-12-05");
+    const D = (o: Partial<Debt>): Debt => ({ id: "d1", person: "করিম", amount: 100000, kind: "borrowed", date: "2026-10-01", createdAt: 1, updatedAt: 1, ...o });
+    const reps: Repayment[] = [{ id: "p1", debtId: "d2", amount: 50000, date: "2026-11-01", createdAt: 1 } as Repayment];
+    const rem = upcomingReminders([R({}), R({ id: "r2", type: "income", dayOfMonth: 4 }), R({ id: "r3", dayOfMonth: 20 })], [D({ dueDate: "2026-11-04" }), D({ id: "d2", kind: "lent", amount: 50000, dueDate: "2026-11-01" })], reps, "2026-11-03", 3);
+    assert.deepEqual(rem.map((r) => [r.id, r.daysLeft]), [["debt:d1", 1], ["rec:r1", 2]]);
+    assert.equal(upcomingReminders([], [D({ dueDate: "2026-10-25" })], [], "2026-11-03", 3)[0].daysLeft, -9);
+  });
+  await ok("মেসের জের: আগের মাসের বাকি পরের মাসে; মিটিয়ে দিলে শূন্য থেকে শুরু", () => {
+    const mem = (id: string): MessMember => ({ id, name: id, active: true, createdAt: 1, updatedAt: 1 });
+    const meal = (d: string, m: string, h: number): MessMeal => ({ id: mealId(d, m), date: d, memberId: m, halves: h, updatedAt: 1 });
+    const ent = (o: Partial<MessEntry>): MessEntry => ({ id: newId(), kind: "bazaar", amount: 100, date: "2026-10-03", createdAt: 1, ...o });
+    const members = [mem("a"), mem("b")];
+    const meals = [meal("2026-10-01", "a", 2), meal("2026-10-01", "b", 2), meal("2026-11-01", "a", 2), meal("2026-11-01", "b", 2)];
+    const entries = [ent({ kind: "deposit", memberId: "a", amount: 60000, date: "2026-10-02" }), ent({ kind: "deposit", memberId: "b", amount: 20000, date: "2026-10-02" }), ent({ amount: 50000, date: "2026-10-05" }), ent({ amount: 30000, date: "2026-11-05" })];
+    assert.deepEqual(messSummary(members, meals, entries, "2026-11").rows.map((r) => r.balance), [-15000, -15000]);
+    const carry = messCarryChain(members, meals, entries, "2026-11");
+    assert.equal(carry.get("a"), 35000);
+    assert.equal(carry.get("b"), -5000);
+    assert.deepEqual(messSummary(members, meals, entries, "2026-11", carry).rows.map((r) => r.balance), [20000, -20000]);
+    assert.equal(messCarryChain(members, meals, entries, "2026-11", "2026-10").size, 0);
+  });
+  await ok("দোকান: গড় ক্রয়দামে লাভ (সরল হিসাব অপরিবর্তিত), সেরা পণ্য, বাকির বয়স", () => {
+    const P = (id: string, o: Partial<ShopProduct> = {}): ShopProduct => ({ id, name: id, unit: "kg", buyPrice: 0, sellPrice: 0, openingStock: 0, minStock: 0, createdAt: 1, updatedAt: 1, ...o });
+    const E = (o: Partial<ShopEntry>): ShopEntry => ({ id: newId(), kind: "sale", amount: 100, date: "2026-11-03", createdAt: 1, ...o });
+    const products = [P("rice", { openingStock: 10000, buyPrice: 6000 })];
+    const se = [
+      E({ kind: "purchase", productId: "rice", qty: 10000, amount: 80000, date: "2026-11-01" }),
+      E({ kind: "sale", productId: "rice", qty: 5000, amount: 50000, date: "2026-11-02" }),
+      E({ kind: "sale", amount: 20000, date: "2026-11-02" }),
+      E({ kind: "purchase", amount: 10000, date: "2026-11-02" }),
+      E({ kind: "expense", amount: 5000, date: "2026-11-02" }),
+    ];
+    assert.equal(cogsOf(costBasis(products, se).get("rice"), 5000, 6000), 35000);
+    const ap = shopProfitAvg(se, products, "2026-11-01", "2026-11-30");
+    assert.equal(ap.profit, 70000 - 35000 - 10000 - 5000);
+    assert.equal(shopSummary(se, [], "2026-11-01", "2026-11-30").profit, 70000 - 90000 - 5000);
+    assert.equal(topProducts([E({ productId: "rice", qty: 1000, amount: 5000 })], products, null, null)[0].revenue, 5000);
+    const ag = [E({ kind: "sale", amount: 1000, paidAmount: 0, partyId: "c1", date: "2026-10-01" }), E({ kind: "sale", amount: 500, paidAmount: 0, partyId: "c1", date: "2026-10-20" }), E({ kind: "receive", amount: 1000, partyId: "c1", date: "2026-11-01" })];
+    assert.equal(oldestDue("c1", ag), "2026-10-20");
+    assert.equal(dueAgeDays("c1", ag, "2026-11-10"), 21);
+  });
+  await ok("AI: খরচের বিবরণ বন্ধ থাকলে নিজের লেখা পাঠানো হয় না", () => {
+    const secret = "রহিমের বিয়ের উপহার";
+    const dataB = { transactions: [tx({ type: "expense", amount: 900000, description: secret, date: todayDhaka() })], categories: DEFAULT_CATEGORIES, budgets: [], debts: [], repayments: [] };
+    assert.ok(buildFacts(dataB, todayDhaka(), "bn", "bn", 1, true).includes(secret));
+    assert.ok(!buildFacts(dataB, todayDhaka(), "bn", "bn", 1, false).includes(secret));
+  });
+  await ok("লক্ষ্য ও লক্ষ্যের লেনদেন ব্যাকআপে যায়-ফেরে; অচেনা লক্ষ্য প্রত্যাখ্যাত; পুরনো ব্যাকআপ চলে", async () => {
+    await eraseAllData();
+    const now = Date.now();
+    await db.goals.add({ id: "gl1", name: "বাইক", target: 8000000, deadline: "2027-06-30", createdAt: now, updatedAt: now });
+    await db.transactions.add(tx({ id: "gt1", type: "saving", amount: 500000, categoryId: "cat_saving", goalId: "gl1" }));
+    const text10 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    await restoreBackup(validateBackupText(text10));
+    assert.equal((await db.goals.get("gl1"))?.target, 8000000);
+    assert.equal((await db.transactions.get("gt1"))?.goalId, "gl1");
+    const bad = JSON.parse(text10);
+    bad.data.transactions.find((x: Transaction) => x.id === "gt1").goalId = "nope";
+    assert.throws(() => validateBackupText(JSON.stringify(bad)), (e: unknown) => e instanceof BackupError);
+    const old = JSON.parse(text10);
+    delete old.data.goals;
+    for (const x of old.data.transactions) delete x.goalId;
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.goals, []);
+    await eraseAllData();
+  });
+
   console.log("মেসের বাজেট");
   await ok("মেসের বাজেট: খরচ = বাজার + সাধারণ খরচ; সতর্কতা; দৈনিক সীমা; পূর্বাভাস", () => {
     const mem = (id: string): MessMember => ({ id, name: id, active: true, createdAt: 1, updatedAt: 1 });
@@ -712,6 +807,94 @@ const tx = (p: Partial<Transaction>): Transaction => ({ id: newId(), type: "expe
     assert.equal((await db.transactions.get("rb1"))?.reimbursedAt, "2026-11-09");
     assert.ok(await db.transactions.get(reimbursementIncomeId("rb1")));
     assert.ok(await db.categories.get(REIMBURSEMENT_CATEGORY_ID));
+    await eraseAllData();
+  });
+
+  console.log("লক্ষ্য, রিমাইন্ডার, জের ও গড় লাভ");
+  await ok("সঞ্চয়ের লক্ষ্য: জমা − উত্তোলন, শতাংশ, মাসে কত লাগবে", () => {
+    const G = (o: Partial<Goal> = {}): Goal => ({ id: "g1", name: "বাইক", target: 8000000, createdAt: 1, updatedAt: 1, ...o });
+    const txs = [tx({ type: "saving", amount: 2000000, goalId: "g1" }), tx({ type: "saving", amount: 500000, goalId: "g1" }), tx({ type: "withdraw", amount: 300000, goalId: "g1" }), tx({ type: "saving", amount: 999999, goalId: "other" }), tx({ type: "expense", amount: 5000, goalId: "g1" })];
+    let p = goalProgress(G(), txs, "2026-11-10");
+    assert.equal(p.saved, 2200000);
+    assert.equal(p.percent, 27);
+    p = goalProgress(G({ deadline: "2027-04-30" }), txs, "2026-11-10");
+    assert.equal(p.monthsLeft, 6);
+    assert.equal(p.neededPerMonth, Math.ceil(5800000 / 6));
+    assert.equal(goalProgress(G({ deadline: "2026-10-01" }), txs, "2026-11-10").overdue, true);
+    assert.equal(goalProgress(G({ target: 2200000 }), txs, "2026-11-10").done, true);
+    assert.equal(goalProgress(G(), [tx({ type: "withdraw", amount: 5, goalId: "g1" })], "2026-11-10").saved, 0);
+  });
+  await ok("আসন্ন বিল/কিস্তি/ঋণের রিমাইন্ডার", () => {
+    const R = (o: Partial<Recurring> = {}): Recurring => ({ id: "r1", type: "expense", amount: 800000, categoryId: "cat_housing", description: "ভাড়া", dayOfMonth: 5, startMonth: "2026-05", active: true, createdAt: 0, updatedAt: 0, ...o });
+    assert.equal(nextRecurringDate(R(), "2026-11-03"), "2026-11-05");
+    assert.equal(nextRecurringDate(R(), "2026-11-06"), "2026-12-05");
+    assert.equal(nextRecurringDate(R({ lastMonth: "2026-11" }), "2026-11-03"), "2026-12-05");
+    assert.equal(nextRecurringDate(R({ active: false }), "2026-11-03"), null);
+    const D = (o: Partial<Debt>): Debt => ({ id: "d1", person: "করিম", amount: 100000, kind: "borrowed", date: "2026-10-01", createdAt: 1, updatedAt: 1, ...o });
+    const rem = upcomingReminders([R(), R({ id: "r2", type: "income", dayOfMonth: 4 }), R({ id: "r3", dayOfMonth: 20 })], [D({ dueDate: "2026-11-04" }), D({ id: "d3", dueDate: "2026-12-30" }), D({ id: "d4" })], [], "2026-11-03", 3);
+    assert.deepEqual(rem.map((r) => [r.id, r.daysLeft]), [["debt:d1", 1], ["rec:r1", 2]]);
+    assert.equal(upcomingReminders([], [D({ dueDate: "2026-10-25" })], [], "2026-11-03", 3)[0].daysLeft, -9);
+  });
+  await ok("মেসের আগের মাসের জের (ডিফল্টে বন্ধ, চালু করলে জমে, মিটিয়ে দিলে শূন্য)", () => {
+    const mem = (id: string): MessMember => ({ id, name: id, active: true, createdAt: 1, updatedAt: 1 });
+    const meal = (d: string, m: string, h: number): MessMeal => ({ id: mealId(d, m), date: d, memberId: m, halves: h, updatedAt: 1 });
+    const ent = (o: Partial<MessEntry>): MessEntry => ({ id: newId(), kind: "bazaar", amount: 100, date: "2026-10-03", createdAt: 1, ...o });
+    const members = [mem("a"), mem("b")];
+    const meals = [meal("2026-10-01", "a", 2), meal("2026-10-01", "b", 2), meal("2026-11-01", "a", 2), meal("2026-11-01", "b", 2)];
+    const entries = [ent({ kind: "deposit", memberId: "a", amount: 60000, date: "2026-10-02" }), ent({ kind: "deposit", memberId: "b", amount: 20000, date: "2026-10-02" }), ent({ amount: 50000, date: "2026-10-05" }), ent({ amount: 30000, date: "2026-11-05" })];
+    assert.deepEqual(messSummary(members, meals, entries, "2026-11").rows.map((r) => r.balance), [-15000, -15000]);
+    const carry = messCarryChain(members, meals, entries, "2026-11");
+    assert.equal(carry.get("a"), 35000);
+    assert.equal(carry.get("b"), -5000);
+    assert.deepEqual(messSummary(members, meals, entries, "2026-11", carry).rows.map((r) => r.balance), [20000, -20000]);
+    assert.equal(messCarryChain(members, meals, entries, "2026-11", "2026-10").size, 0);
+  });
+  await ok("দোকান: গড় ক্রয়দামে লাভ (সরল হিসাব অপরিবর্তিত), সেরা পণ্য, বাকির বয়স", () => {
+    const P = (id: string, o: Partial<ShopProduct> = {}): ShopProduct => ({ id, name: id, unit: "kg", buyPrice: 0, sellPrice: 0, openingStock: 0, minStock: 0, createdAt: 1, updatedAt: 1, ...o });
+    const E = (o: Partial<ShopEntry>): ShopEntry => ({ id: newId(), kind: "sale", amount: 100, date: "2026-11-03", createdAt: 1, ...o });
+    const products = [P("rice", { openingStock: 10000, buyPrice: 6000 })];
+    const se = [
+      E({ kind: "purchase", productId: "rice", qty: 10000, amount: 80000, date: "2026-11-01" }),
+      E({ kind: "sale", productId: "rice", qty: 5000, amount: 50000, date: "2026-11-02" }),
+      E({ kind: "sale", amount: 20000, date: "2026-11-02" }),
+      E({ kind: "purchase", amount: 10000, date: "2026-11-02" }),
+      E({ kind: "expense", amount: 5000, date: "2026-11-02" }),
+    ];
+    assert.equal(costBasis(products, se).get("rice")?.cost, 140000);
+    assert.equal(cogsOf(costBasis(products, se).get("rice"), 5000, 6000), 35000);
+    const ap = shopProfitAvg(se, products, "2026-11-01", "2026-11-30");
+    assert.equal(ap.profit, 70000 - 35000 - 10000 - 5000);
+    assert.equal(shopSummary(se, [], "2026-11-01", "2026-11-30").profit, 70000 - 90000 - 5000);
+    assert.deepEqual(topProducts([E({ productId: "rice", qty: 1000, amount: 5000 }), E({ productId: "rice", qty: 2000, amount: 9000 })], products, null, null).map((x) => [x.qty, x.revenue]), [[3000, 14000]]);
+    const ag = [E({ kind: "sale", amount: 1000, paidAmount: 0, partyId: "c1", date: "2026-10-01" }), E({ kind: "sale", amount: 500, paidAmount: 0, partyId: "c1", date: "2026-10-20" }), E({ kind: "receive", amount: 1000, partyId: "c1", date: "2026-11-01" })];
+    assert.equal(oldestDue("c1", ag), "2026-10-20");
+    assert.equal(dueAgeDays("c1", ag, "2026-11-10"), 21);
+  });
+  await ok("AI-তে খরচের বিবরণ পাঠানো যায়/বন্ধ রাখা যায়", () => {
+    const today = todayDhaka();
+    const data = { transactions: [tx({ type: "expense", amount: 555500, description: "গোপন-বিবরণ-XYZ", date: today })], categories: DEFAULT_CATEGORIES, budgets: [], debts: [], repayments: [] };
+    assert.ok(buildFacts(data, today, "bn", "en", 1, true).includes("গোপন-বিবরণ-XYZ"));
+    assert.ok(buildFacts(data, today, "bn", "en").includes("গোপন-বিবরণ-XYZ"));
+    assert.ok(!buildFacts(data, today, "bn", "en", 1, false).includes("গোপন-বিবরণ-XYZ"));
+  });
+  await ok("লক্ষ্য ও লক্ষ্যে-বাঁধা সঞ্চয় ব্যাকআপে যায়-ফেরে; অচেনা লক্ষ্য প্রত্যাখ্যাত; পুরনো ব্যাকআপ চলে", async () => {
+    await eraseAllData();
+    const now = Date.now();
+    await db.goals.add({ id: "gl1", name: "বাইক", target: 8000000, deadline: "2027-06-30", createdAt: now, updatedAt: now });
+    await db.transactions.add({ ...tx({ type: "saving", amount: 500000, categoryId: "cat_saving" }), id: "gt1", goalId: "gl1" });
+    const text10 = JSON.stringify(await buildBackup());
+    await eraseAllData();
+    assert.equal(await db.goals.count(), 0);
+    await restoreBackup(validateBackupText(text10));
+    assert.equal((await db.goals.get("gl1"))?.target, 8000000);
+    assert.equal((await db.transactions.get("gt1"))?.goalId, "gl1");
+    const bad = JSON.parse(text10);
+    bad.data.transactions.find((x: Transaction) => x.id === "gt1").goalId = "nope";
+    assert.throws(() => validateBackupText(JSON.stringify(bad)), (e: unknown) => e instanceof BackupError);
+    const old = JSON.parse(text10);
+    delete old.data.goals;
+    for (const x of old.data.transactions) delete x.goalId;
+    assert.deepEqual(validateBackupText(JSON.stringify(old)).data.goals, []);
     await eraseAllData();
   });
 

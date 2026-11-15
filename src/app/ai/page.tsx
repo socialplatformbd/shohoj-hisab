@@ -22,9 +22,9 @@ interface Draft {
   date: string;
 }
 
-type AiFail = "offline" | "not_configured" | "unavailable";
+type AiFail = "offline" | "not_configured" | "unavailable" | "unauthorized";
 
-async function callAi<T>(body: unknown): Promise<{ ok: true; data: T } | { ok: false; reason: AiFail }> {
+async function callAi<T>(body: unknown, accessCode = ""): Promise<{ ok: true; data: T } | { ok: false; reason: AiFail }> {
   if (typeof navigator !== "undefined" && !navigator.onLine) return { ok: false, reason: "offline" };
   // AbortSignal.timeout পুরনো ফোনের ব্রাউজারে নেই (ছুঁড়লে AI কখনোই চলত না) — তাই AbortController
   const ctrl = new AbortController();
@@ -32,11 +32,12 @@ async function callAi<T>(body: unknown): Promise<{ ok: true; data: T } | { ok: f
   try {
     const res = await fetch("/api/ai", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(accessCode ? { "x-access-code": accessCode } : {}) },
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
     if (res.status === 503) return { ok: false, reason: "not_configured" };
+    if (res.status === 401) return { ok: false, reason: "unauthorized" };
     if (!res.ok) return { ok: false, reason: "unavailable" };
     return { ok: true, data: (await res.json()) as T };
   } catch {
@@ -105,7 +106,7 @@ function EntryTab() {
         text: text.trim(),
         today,
         categories: data.categories.filter((c) => c.type === "income" || c.type === "expense").map((c) => ({ id: c.id, type: c.type, name: c.name })),
-      });
+      }, settings.aiAccessCode);
       let drafts: Draft[] | null = null;
       if (res.ok) {
         const parsed = ExtractResponseSchema.safeParse(res.data);
@@ -211,7 +212,7 @@ function EntryTab() {
             <p className="text-xs text-muted">{t("aiPreviewNote")}</p>
             {source && (
               <p className={`mt-2 rounded-lg px-3 py-2 text-xs ${source.kind === "ai" ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200"}`}>
-                {source.kind === "ai" ? t("aiSourceAi") : `${source.reason === "not_configured" ? t("aiNotConfigured") : source.reason === "offline" ? t("offlineAi") : t("aiUnavailable")} ${t("aiSourceLocal")}`}
+                {source.kind === "ai" ? t("aiSourceAi") : `${source.reason === "not_configured" ? t("aiNotConfigured") : source.reason === "unauthorized" ? t("aiUnauthorized") : source.reason === "offline" ? t("offlineAi") : t("aiUnavailable")} ${t("aiSourceLocal")}`}
               </p>
             )}
           </div>
@@ -321,12 +322,12 @@ function AskTab() {
     }
     setBusy(true);
     try {
-      const res = await callAi<{ answer?: string }>({ mode: "chat", question: text, facts: buildFacts(data, today, lang, digits, settings.monthStartDay), lang });
+      const res = await callAi<{ answer?: string }>({ mode: "chat", question: text, facts: buildFacts(data, today, lang, digits, settings.monthStartDay, settings.aiSendDetails), lang }, settings.aiAccessCode);
       if (res.ok && typeof res.data.answer === "string" && res.data.answer.trim()) {
         push({ role: "assistant", text: res.data.answer, source: "ai" });
       } else {
         const reason: AiFail = res.ok ? "unavailable" : res.reason;
-        const notice = reason === "offline" ? t("offlineAi") : reason === "not_configured" ? t("aiNotConfigured") : t("aiUnavailable");
+        const notice = reason === "offline" ? t("offlineAi") : reason === "not_configured" ? t("aiNotConfigured") : reason === "unauthorized" ? t("aiUnauthorized") : t("aiUnavailable");
         const local = localAnswer(text, data, today, lang, digits, settings.monthStartDay);
         push({ role: "assistant", text: local ?? t("aiCannotAnswerLocal"), source: "local", notice });
       }

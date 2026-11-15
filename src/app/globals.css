@@ -107,3 +107,80 @@ body {
 .no-scrollbar {
   scrollbar-width: none;
 }
+
+/* ---- PDF / প্রিন্ট: শুধু .print-root ছাপা হয় ---- */
+.print-root {
+  display: none;
+}
+@page {
+  margin: 14mm;
+}
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  body > *:not(.print-root) {
+    display: none !important;
+  }
+  .print-root {
+    display: block;
+  }
+  .print-root,
+  .print-root * {
+    color: #000 !important;
+    background: transparent !important;
+  }
+  .print-root {
+    font-size: 11pt;
+    line-height: 1.45;
+  }
+  .print-root h1 {
+    font-size: 18pt;
+    font-weight: 800;
+    margin: 0 0 2pt;
+  }
+  .print-root h2 {
+    font-size: 13pt;
+    font-weight: 700;
+    margin: 14pt 0 4pt;
+  }
+  .print-root .print-sub,
+  .print-root .print-foot {
+    font-size: 9.5pt;
+    margin: 0 0 6pt;
+  }
+  .print-root .print-foot {
+    margin-top: 16pt;
+  }
+  .print-root table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 4pt;
+  }
+  .print-root th,
+  .print-root td {
+    border-bottom: 0.5pt solid #999;
+    padding: 3pt 4pt;
+    text-align: left;
+    vertical-align: top;
+  }
+  .print-root thead th {
+    border-bottom: 1pt solid #000;
+    font-weight: 700;
+  }
+  .print-root .r {
+    text-align: right;
+  }
+  .print-root .print-kv th {
+    width: 55%;
+    font-weight: 500;
+  }
+  .print-root .print-kv td {
+    text-align: right;
+    font-weight: 700;
+  }
+  .print-root tr {
+    break-inside: avoid;
+  }
+}

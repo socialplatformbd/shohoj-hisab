@@ -43,6 +43,7 @@ export default function SettingsPage() {
   const { t, settings, updateSetting, data, toast, confirm, lang, digits, date, num, installEvent, installed, promptInstall, dataReady } = useApp();
   const [name, setName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [aiCode, setAiCode] = useState(settings.aiAccessCode);
   const [backupPw, setBackupPw] = useState("");
   const [pendingEnc, setPendingEnc] = useState<string | null>(null);
   const restoreRef = useRef<HTMLInputElement>(null);
@@ -228,6 +229,30 @@ export default function SettingsPage() {
     } else toast(t("notifDenied"), "warn");
   }
 
+  async function toggleReminders() {
+    if (settings.billReminders) {
+      await updateSetting("billReminders", false);
+      return;
+    }
+    if (typeof Notification === "undefined") return toast(t("notifUnsupported"), "warn");
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      await updateSetting("billReminders", true);
+      toast(t("settingsSaved"));
+    } else toast(t("notifDenied"), "warn");
+  }
+
+  async function saveAiCode() {
+    const v = aiCode.trim();
+    if (v === settings.aiAccessCode) return;
+    try {
+      await updateSetting("aiAccessCode", v);
+      toast(t("settingsSaved"));
+    } catch {
+      toast(t("dbError"), "error");
+    }
+  }
+
   async function eraseAll() {
     const ok = await confirm({ title: t("resetTitle"), message: t("resetBody"), confirmText: t("resetAction") });
     if (!ok) return;
@@ -314,6 +339,25 @@ export default function SettingsPage() {
             {settings.budgetNotifications ? t("notifOn") : t("notifEnable")}
           </button>
         )}
+      </Section>
+
+      <Section title={t("remindSetting")}>
+        <p className="text-sm text-muted">{t("remindSettingHint")}</p>
+        <button className={`btn w-full ${settings.billReminders ? "btn-ghost" : "btn-primary"}`} onClick={() => void toggleReminders()}>
+          {settings.billReminders ? t("notifOn") : t("notifEnable")}
+        </button>
+      </Section>
+
+      <Section title={t("aiTitle")}>
+        <label className="flex min-h-11 items-center gap-3">
+          <input type="checkbox" className="h-5 w-5" checked={settings.aiSendDetails} onChange={(e) => void updateSetting("aiSendDetails", e.target.checked)} />
+          <span className="font-medium">{t("aiDetailsSetting")}</span>
+        </label>
+        <p className="text-xs text-muted">{t("aiDetailsHint")}</p>
+        <Field label={t("aiCodeLabel")} optional>
+          <input className="input" type="password" autoComplete="off" value={aiCode} onChange={(e) => setAiCode(e.target.value)} onBlur={() => void saveAiCode()} />
+        </Field>
+        <p className="text-xs text-muted">{t("aiCodeHint")}</p>
       </Section>
 
       <Section title={t("secCategories")}>

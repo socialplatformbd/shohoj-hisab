@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { AiRequestSchema, ExtractResponseSchema } from "@/lib/aiSchema";
 
@@ -60,6 +61,13 @@ async function callModel(messages: { role: string; content: string }[], json: bo
   return content;
 }
 
+/** দুই লেখা সমান কিনা, সময় মেপে আন্দাজ করা যায় না এমনভাবে */
+function safeEqual(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
 /** অন্য ওয়েবসাইটের ব্রাউজার থেকে আসা অনুরোধ (আপনার key ভাড়া খাটানো) আটকায় */
 function isSameSite(req: Request): boolean {
   const site = req.headers.get("sec-fetch-site");
@@ -77,6 +85,10 @@ export async function POST(req: Request) {
   if (!isSameSite(req)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
   if (rateLimited(ip)) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+
+  // AI_ACCESS_CODE দেওয়া থাকলে শুধু সেই কোড জানা মানুষ AI চালাতে পারে (key-এর অপব্যবহার ঠেকায়)
+  const accessCode = process.env.AI_ACCESS_CODE;
+  if (accessCode && !safeEqual(req.headers.get("x-access-code") ?? "", accessCode)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   if (!process.env.AI_API_KEY) return NextResponse.json({ error: "not_configured" }, { status: 503 });
 

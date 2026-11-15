@@ -27,7 +27,8 @@ function catLabel(c: Category | undefined, lang: Lang): string {
  * AI-কে দেওয়া "তথ্যের সারাংশ"। সব অঙ্ক এখানে নির্ধারিত কোডে হিসাব করা;
  * AI শুধু এগুলো থেকে উত্তর সাজাবে, নিজে হিসাব বা তথ্য বানাবে না।
  */
-export function buildFacts(data: DataBundle, today: string, lang: Lang, digits: Digits, startDay = 1): string {
+/** includeDetails=false হলে খরচের নিজের লেখা বিবরণ AI-কে পাঠানো হয় না — শুধু খাতের নাম ও অঙ্ক */
+export function buildFacts(data: DataBundle, today: string, lang: Lang, digits: Digits, startDay = 1, includeDetails = true): string {
   const m = (p: number) => formatMoney(p, digits);
   const cats = categoryMap(data.categories);
   const thisMonth = periodKeyOf(today, startDay);
@@ -59,7 +60,7 @@ export function buildFacts(data: DataBundle, today: string, lang: Lang, digits: 
     .filter((x) => x.type === "expense")
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 5)
-    .map((x) => ({ title: x.description || catLabel(cats.get(x.categoryId), lang), amount: m(x.amount), date: x.date }));
+    .map((x) => ({ title: (includeDetails && x.description) || catLabel(cats.get(x.categoryId), lang), amount: m(x.amount), date: x.date }));
 
   return JSON.stringify({
     today,

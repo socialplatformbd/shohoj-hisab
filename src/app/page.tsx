@@ -1,14 +1,18 @@
 "use client";
 
 import { ArrowDownLeft, ArrowUpRight, BarChart3, Bot, Coins, HandCoins, Landmark, Receipt } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
 import { useTxForm } from "@/components/TransactionForm";
 import { TransactionDetailSheet, TransactionRow } from "@/components/TransactionParts";
 import { EmptyState, IncomeExpenseChart, ProgressBar } from "@/components/ui";
+import { accountSummary } from "@/lib/accounts";
 import { budgetStatuses, debtTotals, filterRange, monthlySeries, sumTx } from "@/lib/calc";
 import { addMonths, endOfWeek, endOfYear, monthsBetween, periodKeyOf, periodRange, startOfMonth, startOfWeek, startOfYear, todayDhaka } from "@/lib/dates";
+import { db } from "@/lib/db";
+import { upcomingReminders } from "@/lib/reminders";
 import type { Transaction } from "@/lib/types";
 
 type Preset = "month" | "lastMonth" | "week" | "year" | "all" | "custom";
@@ -18,6 +22,9 @@ export default function Dashboard() {
   const form = useTxForm();
   const today = todayDhaka();
   const startDay = settings.monthStartDay;
+  const recurring = useLiveQuery(() => db.recurring.toArray(), []);
+  const reminders = useMemo(() => (recurring ? upcomingReminders(recurring, data.debts, data.repayments, today, 3) : []), [recurring, data.debts, data.repayments, today]);
+  const accountsSum = useMemo(() => accountSummary(data.accounts, data.transactions, data.transfers), [data.accounts, data.transactions, data.transfers]);
   const [preset, setPreset] = useState<Preset>("month");
   const [custom, setCustom] = useState<{ from: string; to: string }>({ from: startOfMonth(today), to: today });
   const [selected, setSelected] = useState<Transaction | null>(null);
@@ -148,6 +155,44 @@ export default function Dashboard() {
           <StatCard label={t("payables")} value={money(debts.payable)} cls="" icon={<Landmark className="h-4 w-4" />} />
         </Link>
       </section>
+
+      {/* আসন্ন বিল, কিস্তি ও ঋণ */}
+      {reminders.length > 0 && (
+        <section className="card">
+          <h2 className="mb-2 font-bold">{t("remindTitle")}</h2>
+          <ul className="space-y-2">
+            {reminders.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-2 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{r.kind === "recurring" ? r.title || t("remindRecurring") : r.sub === "borrowed" ? t("remindDebtOwe", { p: r.title }) : t("remindDebtGet", { p: r.title })}</p>
+                  <p className={`text-xs ${r.daysLeft < 0 ? "text-rose-600" : "text-muted"}`}>
+                    {r.daysLeft < 0 ? t("remindOverdue", { n: num(-r.daysLeft) }) : r.daysLeft === 0 ? t("remindToday") : r.daysLeft === 1 ? t("remindTomorrow") : t("remindInDays", { n: num(r.daysLeft) })}
+                  </p>
+                </div>
+                <b className="shrink-0">{money(r.amount)}</b>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* অ্যাকাউন্টের ব্যালেন্স */}
+      {data.accounts.length > 0 && (
+        <Link href="/accounts" className="card block">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="font-bold">{t("navAccounts")}</h2>
+            <b className={accountsSum.total < 0 ? "text-rose-600" : ""}>{money(accountsSum.total)}</b>
+          </div>
+          <ul className="space-y-1">
+            {accountsSum.rows.slice(0, 5).map(({ account, balance }) => (
+              <li key={account.id} className="flex justify-between gap-2 text-sm">
+                <span className="truncate">{account.name}</span>
+                <span className={balance < 0 ? "text-rose-600" : ""}>{money(balance)}</span>
+              </li>
+            ))}
+          </ul>
+        </Link>
+      )}
 
       {/* বাজেট */}
       <section className="card">
