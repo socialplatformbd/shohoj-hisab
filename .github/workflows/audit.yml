@@ -1,0 +1,30 @@
+# প্যাকেজের জানা নিরাপত্তা-দুর্বলতা পরীক্ষা। ম্যানুয়ালি চালানো যায় (Actions → Dependency audit → Run workflow),
+# আর প্রতি সোমবার নিজে চলে। high বা critical দুর্বলতা পেলে কাজটি লাল হয়।
+name: Dependency audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Full report (never fails)
+        run: npm audit || true
+
+      - name: Fail on high or critical
+        run: npm audit --audit-level=high
