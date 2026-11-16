@@ -34,6 +34,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // এই অ্যাপ next/image ব্যবহার করে না — ছবি অপ্টিমাইজেশন এন্ডপয়েন্ট বন্ধ রাখলে এর সব দুর্বলতার পথ (SSRF, SVG/AVIF) আর খোলা থাকে না
+  images: { unoptimized: true },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },
