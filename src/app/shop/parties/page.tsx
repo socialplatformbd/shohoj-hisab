@@ -6,11 +6,13 @@ import { useApp } from "@/components/AppProvider";
 import { SHOP_KIND_LABEL, ShopEntrySheet } from "@/components/ShopEntrySheet";
 import { EmptyState, Field, PageHeader, Sheet } from "@/components/ui";
 import { db, newId } from "@/lib/db";
+import { todayDhaka } from "@/lib/dates";
 import { creditOf, partyBalances } from "@/lib/shop";
+import { dueAgeDays } from "@/lib/shopAnalytics";
 import type { ShopEntryKind, ShopParty, ShopPartyKind } from "@/lib/types";
 
 export default function ShopPartiesPage() {
-  const { t, data, money, date, toast, confirm, dataReady } = useApp();
+  const { t, data, money, num, date, toast, confirm, dataReady } = useApp();
   const [tab, setTab] = useState<ShopPartyKind>("customer");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [form, setForm] = useState<{ party?: ShopParty } | null>(null);
@@ -21,6 +23,13 @@ export default function ShopPartiesPage() {
 
   if (!dataReady) return null;
 
+  const today = todayDhaka();
+  /** কত দিন ধরে বাকি (পুরনো বাকি আগে মেটে ধরে); বাকি না থাকলে বা আজকের হলে null */
+  const ageOf = (id: string, balance: number) => {
+    if (balance <= 0) return null;
+    const d = dueAgeDays(id, data.shopEntries, today);
+    return d !== null && d >= 1 ? d : null;
+  };
   const labelFor = (kind: ShopPartyKind, balance: number) => (balance === 0 ? t("shopClear") : balance < 0 ? t("shopAdvance") : kind === "customer" ? t("shopYouGet") : t("shopYouOwe"));
   const detail = detailId ? balances.find((b) => b.party.id === detailId) : undefined;
 
@@ -96,6 +105,10 @@ export default function ShopPartiesPage() {
                 <div className="min-w-0">
                   <p className="truncate text-base font-semibold">{party.name}</p>
                   {party.phone && <p className="text-xs text-muted">{party.phone}</p>}
+                  {(() => {
+                    const age = ageOf(party.id, balance);
+                    return age !== null ? <p className={`text-xs font-medium ${age >= 30 ? "text-rose-600" : "text-amber-700 dark:text-amber-400"}`}>{t("shopOldDue", { d: num(age) })}</p> : null;
+                  })()}
                 </div>
                 <div className="shrink-0 text-right">
                   <p className={`text-lg font-bold ${balance > 0 ? "text-amber-700 dark:text-amber-400" : ""}`}>{money(Math.abs(balance))}</p>
@@ -114,6 +127,7 @@ export default function ShopPartiesPage() {
               <p className="text-sm text-muted">{labelFor(detail.party.kind, detail.balance)}</p>
               <p className="text-2xl font-bold">{money(Math.abs(detail.balance))}</p>
               {detail.party.phone && <p className="mt-1 text-sm text-muted">{detail.party.phone}</p>}
+              {ageOf(detail.party.id, detail.balance) !== null && <p className="mt-1 text-sm font-medium text-amber-700 dark:text-amber-400">{t("shopOldDue", { d: num(ageOf(detail.party.id, detail.balance) ?? 0) })}</p>}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button

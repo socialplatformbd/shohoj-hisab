@@ -4,20 +4,23 @@ import { ChevronLeft, ChevronRight, Pencil, Plus, Receipt, Trash2 } from "lucide
 import { useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
 import { SHOP_KIND_LABEL, ShopEntrySheet } from "@/components/ShopEntrySheet";
+import { PrintBlock, PrintButton, PrintDoc } from "@/components/PrintDoc";
 import { EmptyState, PageHeader } from "@/components/ui";
-import { addMonths, monthKey, todayDhaka } from "@/lib/dates";
+import { addMonths, endOfMonth, monthKey, startOfMonth, todayDhaka } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { formatQty } from "@/lib/products";
-import { creditOf } from "@/lib/shop";
+import { creditOf, shopSummary } from "@/lib/shop";
+import { shopProfitAvg } from "@/lib/shopAnalytics";
 import { SHOP_ENTRY_KINDS, type ShopEntry, type ShopEntryKind } from "@/lib/types";
 
 type Filter = "all" | ShopEntryKind;
 const IN_KINDS: ShopEntryKind[] = ["sale", "receive"];
 
 export default function ShopEntriesPage() {
-  const { t, data, money, num, date, monthLabel, toast, confirm, dataReady } = useApp();
+  const { t, data, money, num, date, monthLabel, settings, toast, confirm, dataReady } = useApp();
   const [month, setMonth] = useState(monthKey(todayDhaka()));
   const [filter, setFilter] = useState<Filter>("all");
+  const [q, setQ] = useState("");
   const [editing, setEditing] = useState<{ entry?: ShopEntry } | null>(null);
 
   const nameOf = useMemo(() => new Map(data.shopParties.map((p) => [p.id, p.name])), [data.shopParties]);
@@ -25,13 +28,61 @@ export default function ShopEntriesPage() {
   const list = useMemo(
     () =>
       data.shopEntries
-        .filter((e) => e.date.slice(0, 7) === month && (filter === "all" || e.kind === filter))
+        .filter((e) => {
+          if (e.date.slice(0, 7) !== month || (filter !== "all" && e.kind !== filter)) return false;
+          const needle = q.trim().toLowerCase();
+          if (!needle) return true;
+          const hay = `${e.note ?? ""} ${e.category ?? ""} ${e.partyId ? (nameOf.get(e.partyId) ?? "") : ""} ${e.productId ? (productOf.get(e.productId) ?? "") : ""}`.toLowerCase();
+          return hay.includes(needle);
+        })
         .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt)),
-    [data.shopEntries, month, filter],
+    [data.shopEntries, month, filter, q, nameOf, productOf],
   );
   const total = list.reduce((s, e) => s + e.amount, 0);
 
   if (!dataReady) return null;
+
+  // মাসিক রিপোর্ট (PDF): ওই মাসের সব এন্ট্রি (খোঁজা/ফিল্টার নির্বিশেষে)
+  const mFrom = startOfMonth(`${month}-01`);
+  const mTo = endOfMonth(`${month}-01`);
+  const avgMode = settings.shopProfitMode === "avg";
+  const ms = shopSummary(data.shopEntries, data.shopParties, mFrom, mTo);
+  const mavg = shopProfitAvg(data.shopEntries, data.shopProducts, mFrom, mTo);
+  const monthEntries = data.shopEntries
+    .filter((e) => e.date >= mFrom && e.date <= mTo)
+    .sort((a, b) => (a.date === b.date ? a.createdAt - b.createdAt : a.date < b.date ? -1 : 1))
+    .slice(0, 400);
+  const printBlocks: PrintBlock[] = [
+    {
+      type: "kv",
+      heading: t("printTotals"),
+      rows: [
+        [t("shopSales"), money(ms.sales)],
+        [t("shopPurchases"), money(ms.purchases)],
+        [t("shopExpenses"), money(ms.expenses)],
+        ...(avgMode ? ([[t("shopCogs"), money(mavg.cogs)]] as [string, string][]) : []),
+        [`${t("shopProfit")} (${avgMode ? t("shopProfitAvg") : t("shopProfitSimple")})`, money(avgMode ? mavg.profit : ms.profit)],
+        [t("shopKindReceive"), money(ms.received)],
+        [t("shopKindPay"), money(ms.paidOut)],
+      ],
+    },
+    ...(monthEntries.length > 0
+      ? [
+          {
+            type: "table" as const,
+            heading: t("shopBook"),
+            head: [t("date"), t("shopEntryKind"), t("shopNote"), t("amount")],
+            rows: monthEntries.map((e) => [
+              date(e.date),
+              t(SHOP_KIND_LABEL[e.kind]),
+              [e.partyId ? nameOf.get(e.partyId) : e.category, e.productId ? productOf.get(e.productId) : undefined, e.note].filter(Boolean).join(" • "),
+              money(e.amount),
+            ]),
+            right: [3],
+          },
+        ]
+      : []),
+  ];
 
   async function remove(e: ShopEntry) {
     if (!(await confirm({ message: t("shopEntryDeleteConfirm"), danger: true, confirmText: t("delete") }))) return;
@@ -45,13 +96,17 @@ export default function ShopEntriesPage() {
 
   return (
     <div>
+      <PrintDoc title={t("shopClosingMonthTitle", { m: monthLabel(month) })} blocks={printBlocks} />
       <PageHeader
         title={t("shopBook")}
         right={
-          <button className="btn btn-primary" onClick={() => setEditing({})}>
-            <Plus className="h-5 w-5" />
-            {t("add")}
-          </button>
+          <div className="flex items-center gap-2">
+            <PrintButton />
+            <button className="btn btn-primary" onClick={() => setEditing({})}>
+              <Plus className="h-5 w-5" />
+              {t("add")}
+            </button>
+          </div>
         }
       />
 
@@ -64,6 +119,8 @@ export default function ShopEntriesPage() {
           <ChevronRight className="h-5 w-5" />
         </button>
       </div>
+
+      <input className="input mb-3" type="search" placeholder={t("searchEntries")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("searchEntries")} />
 
       <div className="mb-3 flex flex-wrap gap-2">
         {(["all", ...SHOP_ENTRY_KINDS] as Filter[]).map((f) => (

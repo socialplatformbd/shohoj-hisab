@@ -3,6 +3,7 @@
 import { Receipt, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/components/AppProvider";
+import { parseAmountToPaisa } from "@/lib/money";
 import { useTxForm } from "@/components/TransactionForm";
 import { TransactionDetailSheet, TransactionRow } from "@/components/TransactionParts";
 import { EmptyState, PageHeader } from "@/components/ui";
@@ -20,6 +21,9 @@ export default function TransactionsPage() {
   const [method, setMethod] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [minText, setMinText] = useState("");
+  const [maxText, setMaxText] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -35,6 +39,10 @@ export default function TransactionsPage() {
 
   const catMap = useMemo(() => new Map(data.categories.map((c) => [c.id, c])), [data.categories]);
 
+  // অঙ্কের সীমা: খালি বা অবৈধ হলে সীমা নেই
+  const minAmt = minText.trim() ? parseAmountToPaisa(minText) : null;
+  const maxAmt = maxText.trim() ? parseAmountToPaisa(maxText) : null;
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return data.transactions
@@ -42,6 +50,9 @@ export default function TransactionsPage() {
         if (type !== "all" && x.type !== type) return false;
         if (categoryId && x.categoryId !== categoryId) return false;
         if (method && x.paymentMethod !== method) return false;
+        if (accountId && x.accountId !== accountId) return false;
+        if (minAmt !== null && x.amount < minAmt) return false;
+        if (maxAmt !== null && x.amount > maxAmt) return false;
         if (from && x.date < from) return false;
         if (to && x.date > to) return false;
         if (needle) {
@@ -51,7 +62,7 @@ export default function TransactionsPage() {
         return true;
       })
       .sort((a, b) => (a.date === b.date ? b.createdAt - a.createdAt : a.date < b.date ? 1 : -1));
-  }, [data.transactions, q, type, categoryId, method, from, to, catName, catMap]);
+  }, [data.transactions, q, type, categoryId, method, accountId, minAmt, maxAmt, from, to, catName, catMap]);
 
   const groups = useMemo(() => {
     const m = new Map<string, Transaction[]>();
@@ -63,7 +74,7 @@ export default function TransactionsPage() {
     return [...m.entries()];
   }, [filtered]);
 
-  const activeFilters = [type !== "all", !!categoryId, !!method, !!from, !!to].filter(Boolean).length;
+  const activeFilters = [type !== "all", !!categoryId, !!method, !!accountId, minAmt !== null, maxAmt !== null, !!from, !!to].filter(Boolean).length;
   const selected = selectedId ? data.transactions.find((x) => x.id === selectedId) : undefined;
   const catOptions = data.categories.filter((c) => type === "all" || c.type === type);
 
@@ -71,6 +82,9 @@ export default function TransactionsPage() {
     setType("all");
     setCategoryId("");
     setMethod("");
+    setAccountId("");
+    setMinText("");
+    setMaxText("");
     setFrom("");
     setTo("");
     setQ("");
@@ -131,6 +145,27 @@ export default function TransactionsPage() {
                 </option>
               ))}
             </select>
+          </div>
+          {data.accounts.length > 0 && (
+            <div className="col-span-2">
+              <label className="label">{t("filterAccount")}</label>
+              <select className="input" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                <option value="">{t("all")}</option>
+                {data.accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="label">{t("filterMinAmount")}</label>
+            <input className="input" inputMode="decimal" value={minText} onChange={(e) => setMinText(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">{t("filterMaxAmount")}</label>
+            <input className="input" inputMode="decimal" value={maxText} onChange={(e) => setMaxText(e.target.value)} />
           </div>
           <div>
             <label className="label">{t("from")}</label>
